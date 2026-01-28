@@ -8,9 +8,11 @@ import pandas as pd
 import numpy as np
 from typing import Tuple
 import logging
+from src.utils import setup_logging
+import config
 
-logger = logging.getLogger(__name__)
-
+#logger = logging.getLogger(__name__)
+logger = setup_logging(__name__, level=logging.INFO, to_file=config.OUTPUT_LOG_FILE)
 
 def quick_score_shifts(
     turnos: pd.DataFrame,
@@ -288,14 +290,11 @@ def select_ilp_shifts(
 
     # Crear variables y_r si se provee solver y cap
     if solver is not None and cap_per_shift is not None:
-        count_ilp = len(turnos_ilp)
         # Nota: no retornamos 'y_r' porque el contrato del usuario pide
         # solo (Real_Matrix, Turnos_ILP). Si lo requieres luego, podemos añadirlo.
-        _ = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(count_ilp)]
+        _ = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(len(turnos_ilp))]
 
     # Logging/print
-    total_asign = int(turnos_ilp["Asignados"].sum())
-    count_ilp = len(turnos_ilp)
     logger.info(
         f"ILP result: {int(turnos_ilp["Asignados"].sum())} asignaciones de {len(turnos_ilp)} turnos (con límite {n_agents})."
     )

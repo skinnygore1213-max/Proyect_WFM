@@ -5,38 +5,55 @@ Utilidades generales: logging, validaciones, helpers.
 import logging
 import sys
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 
-def setup_logging(name: str = __name__, level=logging.INFO) -> logging.Logger:
+def setup_logging(name: str = __name__, 
+    level=logging.INFO,
+    to_file: Optional[str] = None,
+) -> logging.Logger:
     """
     Configura logger con salida a consola y (opcionalmente) archivo.
-    
     Args:
         name: Nombre del logger
         level: Nivel de logging (DEBUG, INFO, WARNING, ERROR)
-        
+        to_file: Ruta de archivo para log (opcional).
+        file_level: Nivel específico para el archivo (si None, usa 'level')
     Returns:
         Logger configurado
     """
     logger = logging.getLogger(name)
     logger.setLevel(level)
-    
+    # Evita duplicados por propagación al root
+    logger.propagate = False
+    new_handlers = []
     # Handler de consola
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
-    
     # Formato
-    formatter = logging.Formatter(
+    console_formatter = logging.Formatter(
         "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S"
     )
-    console_handler.setFormatter(formatter)
-    
+    console_handler.setFormatter(console_formatter)
+    #new_handlers.append(console_handler)
+
     # Agregar si no existe
     if not logger.handlers:
         logger.addHandler(console_handler)
+
     
+    if to_file:
+        file_handler = logging.FileHandler(to_file, mode="a", encoding="utf-8", delay=False)
+        file_handler.setLevel(level)
+        # En archivo normalmente conviene un formato un poco más detallado
+        file_formatter = logging.Formatter(
+            fmt="%(asctime)s | %(levelname)s | %(name)s | %(filename)s:%(lineno)d | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+        file_handler.setFormatter(file_formatter)
+        logger.addHandler(file_handler)
+
     return logger
 
 

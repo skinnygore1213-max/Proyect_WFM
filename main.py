@@ -60,7 +60,7 @@ def main():
     # ============================================================
     # SETUP
     # ============================================================
-    logger = setup_logging(__name__, level=logging.INFO)
+    logger = setup_logging(__name__, level=logging.INFO, to_file=config.OUTPUT_LOG_FILE)
     log_startup("WFM Scheduling System")
     np.random.seed(config.RANDOM_SEED)
     ensure_output_dir(config.OUTPUT_DIR)
@@ -126,8 +126,10 @@ def main():
             agentes_disponibles = filter_available_agents(agentes)
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
-            
+            agentes[dia] = 0
+
             # Vectores de datos
+            required_curva = curva_dia["Requeridos"].astype(int).values
             required_full = curva_dia["Requeridos"].astype(int).values
             i_min_full = curva_dia["i_min"].values
             f_min_full = curva_dia["f_min"].values
@@ -147,7 +149,7 @@ def main():
             )
             
             # -------- 3b. Preselección heurística --------
-            logger.info(f"Preselección heurística K={config.K_PRESELECT}...")
+            #logger.info(f"Preselección heurística K={config.K_PRESELECT}...")
             
             turnos_k = preselect_shifts(
                 turnos,
@@ -160,12 +162,12 @@ def main():
             )
             
             # -------- 3c. Curvas exactas --------
-            logger.info(f"Cálculo de curvas exactas para M={config.M_FINAL}...")
+            #logger.info(f"Cálculo de curvas exactas para M={config.M_FINAL}...")
             
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
             turnos_m, shift_matrix = select_final_shifts(turnos_k, config.M_FINAL)
             M = shift_matrix.shape[0]
-            logger.info(f"Matriz de cobertura: {M} turnos × 48 intervalos")
+            #logger.info(f"Matriz de cobertura: {M} turnos × 48 intervalos")
             
             # -------- 3d. Resolución ILP --------
             logger.info(f"Resolviendo ILP diario...")
@@ -199,6 +201,7 @@ def main():
                     turnos_m=turnos_m,
                     solver=solver,                 # opcional
                     cap_per_shift=config.CAP_PER_SHIFT,   # opcional
+                  
                     n_agents=n_agents              # opcional (solo logging)
                 )
 
@@ -207,7 +210,7 @@ def main():
                 
                 agentes_ids = agentes_disponibles["AgentID"].tolist()
                 asignaciones = assign_shifts_to_agents(
-                    y_val, turnos_ilp, agentes, agentes_ids
+                    y_val, turnos_ilp, agentes, agentes_ids, dia
                 )
 
                 # Construir dataframes
@@ -220,7 +223,7 @@ def main():
                 turnos_ilp["Fecha"] = dia
                 ILP_results_semanal.append(turnos_ilp)
 
-                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_full, covered, Real_covered,dia)
+                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_full, covered, Real_covered, dia)
                 cobertura_semanal.append(df_cov)
                 
                 logger.info(f"Día {dia} completado: {len(asignaciones)} asignaciones")
@@ -254,7 +257,7 @@ def main():
         # Exportar
         export_assignment_results(
             asignacion_semanal,
-            cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Cubierto", "Under", "Over"]],
+            cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Ideal_Cubierto","Real_Cubierto" ,"Under", "Over"]],
             agentes,
             ILP_results_semanal,
             config.OUTPUT_ASSIGNMENT,

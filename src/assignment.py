@@ -17,7 +17,8 @@ def assign_shifts_to_agents(
     y_val: np.ndarray,
     turnos_m: pd.DataFrame,
     agentes: pd.DataFrame,
-    agentes_disponibles_list: List[str]
+    agentes_disponibles_list: List[str],
+    dia: str
 ) -> List[Dict]:
     """
     Asigna turnos a agentes de forma greedy.
@@ -53,7 +54,7 @@ def assign_shifts_to_agents(
         turno_id = turnos_m.loc[j, "Turno_ID"] if "Turno_ID" in turnos_m.columns else f"T{j:03d}"
         h_ini = str(turnos_m.loc[j, "Hora_Inicio"])
         h_fin = str(turnos_m.loc[j, "Hora_Termino"])
-        duracion = float(turnos_m.loc[j, "Duracion_Horas"])
+        duracion = int(turnos_m.loc[j, "Duracion_Horas"])
         
         # Asignar cnt veces este turno
         ptr = 0
