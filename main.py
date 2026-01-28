@@ -1,0 +1,268 @@
+"""
+WFM Scheduling System - Punto de entrada principal.
+
+Generador de horarios óptimos usando Integer Linear Programming.
+Coordina flujo: carga → transformación → optimización → exportación.
+
+Uso:
+    python main.py
+
+Resultado:
+    - Result/AsignacionTurnos.xlsx
+    - Result/CoberturaFinal.xlsx
+    - Result/Agents.xlsx
+"""
+
+import sys
+import logging
+import numpy as np
+import pandas as pd
+
+import config
+from src.utils import setup_logging, log_startup, log_completion, summarize_execution
+from src.io import load_data_bundle, ensure_output_dir, export_assignment_results
+from src.transforms import (
+    parse_time_intervals,
+    process_turnos_catalog,
+    process_agentes_catalog,
+    convert_to_minutes,
+    filter_by_date,
+    filter_available_agents,
+)
+from src.time_utils import min_to_hhmm
+from src.coverage import detect_time_window, filter_to_window, log_window_info
+from src.shifts import preselect_shifts, compute_exact_curves, select_final_shifts
+from src.optimization import build_daily_ilp, extract_solution, is_solution_valid
+from src.assignment import (
+    assign_shifts_to_agents,
+    build_assignment_dataframe,
+    build_coverage_dataframe,
+    format_coverage_for_export,
+)
+
+
+def main():
+    """
+    Flujo principal de generación de horarios.
+    
+    1. Carga de datos (curva, agentes, turnos)
+    2. Transformación y normalización
+    3. Para cada día:
+       a. Detección de ventana horaria
+       b. Preselección heurística de turnos
+       c. Cálculo de curvas exactas (con pausas)
+       d. Resolución ILP
+       e. Asignación a agentes
+       f. Registro de cobertura
+    4. Exportación de resultados
+    """
+    
+    # ============================================================
+    # SETUP
+    # ============================================================
+    logger = setup_logging(__name__, level=logging.INFO)
+    log_startup("WFM Scheduling System")
+    np.random.seed(config.RANDOM_SEED)
+    ensure_output_dir(config.OUTPUT_DIR)
+    
+    try:
+        # ============================================================
+        # 1. CARGA DE DATOS
+        # ============================================================
+        logger.info("="*70)
+        logger.info("FASE 1: Carga de datos")
+        logger.info("="*70)
+        
+        curva, agentes, turnos = load_data_bundle(
+            config.CURVA_FILE,
+            config.AGENTS_FILE,
+            config.TURNOS_FILE,
+            sep=config.CSV_SEPARATOR,
+            encoding=config.CSV_ENCODING
+        )
+        
+        # ============================================================
+        # 2. TRANSFORMACIÓN DE DATOS
+        # ============================================================
+        logger.info("="*70)
+        logger.info("FASE 2: Transformación y normalización")
+        logger.info("="*70)
+        
+        # Procesar curva
+        curva = parse_time_intervals(curva)
+        curva = convert_to_minutes(curva)
+        
+        # Procesar turnos
+        turnos = process_turnos_catalog(turnos)
+        
+        # Procesar agentes
+        agentes = process_agentes_catalog(agentes, config.MAX_HOURS_WEEK)
+        
+        # Fechas disponibles
+        dias_disponibles = filter_by_date(curva)
+        logger.info(f"Días a procesar: {len(dias_disponibles)}")
+        
+        # ============================================================
+        # 3. LOOP POR DÍA
+        # ============================================================
+        logger.info("="*70)
+        logger.info("FASE 3: Procesamiento diario (ILP)")
+        logger.info("="*70)
+        
+        asignacion_semanal = []
+        cobertura_semanal = []
+        
+        for dia in dias_disponibles:
+            logger.info("")
+            logger.info(f"{'*'*70}")
+            logger.info(f"Procesando: {dia}")
+            logger.info(f"{'*'*70}")
+            
+            # Filtrar curva del día
+            curva_dia = curva[curva['Fecha'] == dia].copy()
+            
+            # Agentes disponibles
+            agentes_disponibles = filter_available_agents(agentes)
+            n_agents = len(agentes_disponibles)
+            logger.info(f"Agentes disponibles: {n_agents}")
+            
+            # Vectores de datos
+            required_full = curva_dia["Requeridos"].astype(int).values
+            i_min_full = curva_dia["i_min"].values
+            f_min_full = curva_dia["f_min"].values
+            
+            # -------- 3a. Detección de ventana --------
+            window_start, window_end = detect_time_window(required_full, i_min_full, f_min_full)
+            
+            if window_start is None:
+                logger.warning(f"Sin demanda positiva en {dia}. Saltando.")
+                continue
+            
+            log_window_info(window_start, window_end, len(required_full))
+            
+            # Filtrar a ventana
+            i_min, f_min, required, T = filter_to_window(
+                i_min_full, f_min_full, required_full, window_start, window_end
+            )
+            
+            # -------- 3b. Preselección heurística --------
+            logger.info(f"Preselección heurística K={config.K_PRESELECT}...")
+            
+            turnos_k = preselect_shifts(
+                turnos,
+                window_start,
+                window_end,
+                i_min,
+                f_min,
+                required,
+                config.K_PRESELECT
+            )
+            
+            # -------- 3c. Curvas exactas --------
+            logger.info(f"Cálculo de curvas exactas para M={config.M_FINAL}...")
+            
+            turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
+            turnos_m, shift_matrix = select_final_shifts(turnos_k, config.M_FINAL)
+            M = shift_matrix.shape[0]
+            logger.info(f"Matriz de cobertura: {M} turnos × 48 intervalos")
+            
+            # -------- 3d. Resolución ILP --------
+            logger.info(f"Resolviendo ILP diario...")
+            
+            solver, y, u, o, M_check, T_check, status = build_daily_ilp(
+                shift_matrix,
+                required_full,
+                n_agents,
+                config.ALPHA_UNDER,
+                config.BETA_OVER,
+                config.GAMMA_HEAD,
+                config.CAP_PER_SHIFT,
+                config.SEG_WIDTH,
+                config.SEG_MULT_STEP,
+                config.NOISE_EPS,
+                config.SOLVER_MS,
+                config.RANDOM_SEED
+            )
+            
+            # -------- 3e. Extracción de solución --------
+            if is_solution_valid(status):
+                y_val, covered, metrics = extract_solution(
+                    solver, y, u, o, shift_matrix, required_full
+                )
+                
+                # -------- 3f. Asignación a agentes --------
+                logger.info(f"Asignando turnos a agentes...")
+                
+                agentes_ids = agentes_disponibles["AgentID"].tolist()
+                asignaciones = assign_shifts_to_agents(
+                    y_val, turnos_m, agentes, agentes_ids
+                )
+                
+                # Construir dataframes
+                df_asig = build_assignment_dataframe(asignaciones, dia)
+                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_full, covered, dia)
+                
+                asignacion_semanal.append(df_asig)
+                cobertura_semanal.append(df_cov)
+                
+                logger.info(f"Día {dia} completado: {len(asignaciones)} asignaciones")
+                
+            else:
+                logger.error(f"ILP no encontró solución para {dia}")
+            
+            # Crear columna de tracking del día si no existe
+            if dia not in agentes.columns:
+                agentes[dia] = 0
+            
+            # Actualizar agentes disponibles
+            agentes_disponibles = filter_available_agents(agentes)
+            logger.info(f"Agentes con horas disponibles para próximo día: {len(agentes_disponibles)}")
+        
+        # ============================================================
+        # 4. EXPORTACIÓN DE RESULTADOS
+        # ============================================================
+        logger.info("="*70)
+        logger.info("FASE 4: Exportación de resultados")
+        logger.info("="*70)
+        
+        # Concatenar resultados semanales
+        asignacion_semanal = pd.concat(asignacion_semanal, ignore_index=True)
+        cobertura_semanal = pd.concat(cobertura_semanal, ignore_index=True)
+        
+        # Formatear cobertura
+        cobertura_semanal = format_coverage_for_export(cobertura_semanal)
+        
+        # Exportar
+        export_assignment_results(
+            asignacion_semanal,
+            cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Cubierto", "Under", "Over"]],
+            agentes,
+            config.OUTPUT_ASSIGNMENT,
+            config.OUTPUT_COVERAGE,
+            config.OUTPUT_AGENTS
+        )
+        
+        # ============================================================
+        # 5. RESUMEN FINAL
+        # ============================================================
+        total_assignments = len(asignacion_semanal)
+        total_hours = agentes["Horas_Asignadas"].sum()
+        
+        summarize_execution(
+            len(dias_disponibles),
+            total_assignments,
+            total_hours
+        )
+        
+        log_completion("WFM Scheduling System")
+        logger.info("\n✓ Proceso completado exitosamente\n")
+        
+        return 0
+    
+    except Exception as e:
+        logger.exception(f"Error en ejecución: {e}")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

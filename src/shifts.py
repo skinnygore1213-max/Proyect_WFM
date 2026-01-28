@@ -1,0 +1,244 @@
+"""
+Procesamiento de catálogo de turnos.
+
+Preselección heurística rápida, scoring y gestión de turnos.
+"""
+
+import pandas as pd
+import numpy as np
+from typing import Tuple
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+def quick_score_shifts(
+    turnos: pd.DataFrame,
+    itv_start: np.ndarray,
+    itv_end: np.ndarray,
+    required: np.ndarray
+) -> pd.Series:
+    """
+    Scoring rápido: suma de requeridos cubiertos por cada turno (sin pausas).
+    
+    Aproximación: intervalo [t] está cubierto si turno.start <= t.start AND turno.end >= t.end
+    
+    Args:
+        turnos: DataFrame de turnos con 'start_min' y 'end_min'
+        itv_start: Array de inicio de intervalos (minutos)
+        itv_end: Array de fin de intervalos (minutos)
+        required: Array de requeridos por intervalo
+        
+    Returns:
+        Series con score por cada turno
+    """
+    def score_one(start_m: int, end_m: int) -> int:
+        cover = (start_m <= itv_start) & (end_m >= itv_end)
+        return int(np.dot(cover.astype(int), required))
+    
+    scores = turnos.apply(
+        lambda row: score_one(int(row["start_min"]), int(row["end_min"])),
+        axis=1
+    )
+    return scores
+
+
+def preselect_shifts(
+    turnos: pd.DataFrame,
+    window_start: int,
+    window_end: int,
+    itv_start: np.ndarray,
+    itv_end: np.ndarray,
+    required: np.ndarray,
+    k_preselect: int
+) -> pd.DataFrame:
+    """
+    Preselecciona K mejores turnos por score rápido.
+    
+    1. Filtra turnos que solapan con ventana horaria
+    2. Scoring rápido (sin pausas)
+    3. Retorna top K
+    
+    Args:
+        turnos: DataFrame de turnos disponibles
+        window_start: Inicio de ventana detectada (minutos)
+        window_end: Fin de ventana detectada (minutos)
+        itv_start: Array de inicio de intervalos
+        itv_end: Array de fin de intervalos
+        required: Array de requeridos
+        k_preselect: Número de turnos a preseleccionar
+        
+    Returns:
+        DataFrame de K mejores turnos ordenados por score descendente
+        
+    Raises:
+        RuntimeError: Si ningún turno pisa la ventana
+    """
+    # Filtro de overlap con ventana
+    overlap_mask = ~((turnos["end_min"] <= window_start) | (turnos["start_min"] >= window_end))
+    turnos_pref = turnos.loc[overlap_mask].copy().reset_index(drop=True)
+    
+    if len(turnos_pref) == 0:
+        raise RuntimeError("Ningún turno pisa la ventana detectada. Revisa la data.")
+    
+    # Scoring rápido
+    turnos_pref["quick_score"] = quick_score_shifts(
+        turnos_pref, itv_start, itv_end, required
+    )
+    
+    # Seleccionar top K
+    turnos_k = turnos_pref.sort_values("quick_score", ascending=False).head(k_preselect).reset_index(drop=True)
+    
+    logger.info(f"Preseleccionados {len(turnos_k)} turnos de {len(turnos_pref)} solapantes")
+    
+    return turnos_k
+
+
+def build_exact_coverage_vector(
+    start_m: int,
+    end_m: int,
+    descanso1: int,
+    descanso2: int,
+    inicio_refrigerio: str,
+    fin_refrigerio: str,
+    itv_start_full: np.ndarray,
+    itv_end_full: np.ndarray
+) -> np.ndarray:
+    """
+    Construye vector exacto de cobertura por turno, considerando pausas y almuerzo.
+    
+    Lógica:
+    1. Base: 1 si [start, end) cubre completamente intervalo [i, f)
+    2. Restar pausas (breaks) de 15 min
+    3. Restar almuerzo (60 min) si existe
+    4. Manejo de turnos que cruzan medianoche (+1440)
+    
+    Args:
+        start_m: Inicio del turno (minutos desde medianoche)
+        end_m: Fin del turno (minutos desde medianoche)
+        descanso1: Boolean (¿hay break 1?)
+        descanso2: Boolean (¿hay break 2?)
+        inicio_refrigerio: String 'HH:MM' o vacío
+        fin_refrigerio: String 'HH:MM' o vacío
+        itv_start_full: Array de inicio de todos los intervalos
+        itv_end_full: Array de fin de todos los intervalos
+        
+    Returns:
+        Vector booleano (0/1) indicando cobertura por intervalo
+    """
+    from .time_utils import safe_hhmm_to_min
+    
+    # Vector base
+    base = ((start_m <= itv_start_full) & (end_m >= itv_end_full)).astype(int)
+    
+    blocks = []  # (inicio, fin) de pausas a restar
+    
+    # Almuerzo explícito
+    if inicio_refrigerio and fin_refrigerio and inicio_refrigerio.strip() and fin_refrigerio.strip():
+        a0 = safe_hhmm_to_min(inicio_refrigerio)
+        a1 = safe_hhmm_to_min(fin_refrigerio)
+        
+        if a0 is not None and a1 is not None:
+            # Manejo de cruces de medianoche
+            if a1 < a0:
+                a1 += 60
+            if not (start_m <= a0 < end_m):
+                a0 += 1440
+                a1 += 1440
+            blocks.append((a0, a1))
+    else:
+        a0, a1 = None, None
+    
+    # Breaks
+    if int(descanso1) > 0:
+        if a0 is not None:
+            b1s = a0 - 15
+            b1e = a0
+        else:
+            b1s = start_m + max(90, (end_m - start_m) // 3)
+            b1e = b1s + 15
+        blocks.append((b1s, b1e))
+    
+    if int(descanso2) > 0:
+        if a1 is not None:
+            b2s = a1 + 120
+            b2e = b2s + 15
+        else:
+            b2e = end_m - max(90, (end_m - start_m) // 3)
+            b2s = b2e - 15
+        blocks.append((b2s, b2e))
+    
+    # Aplicar pausas
+    mask = base.copy()
+    for (bs, be) in blocks:
+        cut = ~((itv_end_full <= bs) | (itv_start_full >= be))
+        mask[cut] = 0
+    
+    return mask
+
+
+def compute_exact_curves(
+    turnos: pd.DataFrame,
+    itv_start_full: np.ndarray,
+    itv_end_full: np.ndarray,
+    required_full: np.ndarray
+) -> pd.DataFrame:
+    """
+    Calcula vector de cobertura exacta para cada turno (incluye pausas).
+    
+    Args:
+        turnos: DataFrame de turnos preseleccionados
+        itv_start_full: Array de inicio de intervalos (todos)
+        itv_end_full: Array de fin de intervalos (todos)
+        required_full: Array de requeridos (todos)
+        
+    Returns:
+        DataFrame con columnas 'curve_exact' y 'exact_score' agregadas
+    """
+    df = turnos.copy()
+    
+    curves = []
+    scores = []
+    
+    for _, row in df.iterrows():
+        curve = build_exact_coverage_vector(
+            int(row["start_min"]),
+            int(row["end_min"]),
+            int(row.get("Descanso1", 0)),
+            int(row.get("Descanso2", 0)),
+            str(row.get("Inicio_Refrigerio", "")),
+            str(row.get("Fin_Refrigerio", "")),
+            itv_start_full,
+            itv_end_full
+        )
+        curves.append(curve)
+        scores.append(int(np.dot(curve, required_full)))
+    
+    df["curve_exact"] = curves
+    df["exact_score"] = scores
+    
+    return df
+
+
+def select_final_shifts(
+    turnos: pd.DataFrame,
+    m_final: int
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """
+    Selecciona M mejores turnos por exact_score y construye matriz de cobertura.
+    
+    Args:
+        turnos: DataFrame con columna 'exact_score'
+        m_final: Número de turnos a seleccionar
+        
+    Returns:
+        Tupla (turnos_m, shift_matrix) donde:
+        - turnos_m: DataFrame de M mejores turnos
+        - shift_matrix: ndarray (M, T) con cobertura por turno/intervalo
+    """
+    turnos_m = turnos.sort_values("exact_score", ascending=False).head(m_final).reset_index(drop=True)
+    shift_matrix = np.stack(turnos_m["curve_exact"].values)  # shape (M, T)
+    
+    logger.info(f"Seleccionados {len(turnos_m)} turnos finales para ILP (matriz {shift_matrix.shape})")
+    
+    return turnos_m, shift_matrix
