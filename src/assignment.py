@@ -43,8 +43,8 @@ def assign_shifts_to_agents(
     asignaciones = []
     agent_ids_copy = agentes_disponibles_list.copy()  # Copia para iterar sin perder el original
     
-    for j in range(len(y_val)):
-        cnt = int(y_val[j])
+    for j in range(len(turnos_m)):
+        cnt = int(turnos_m.loc[j, "Asignados"])
         
         if cnt == 0:
             continue
@@ -77,10 +77,11 @@ def assign_shifts_to_agents(
                     
                     # Actualizar agentes
                     agentes.loc[agentes["AgentID"] == agent_id, "Horas_Asignadas"] += duracion
-                    agentes.loc[agentes["AgentID"] == agent_id, "Horas_Disponibles"] -= duracion
+                    agentes.loc[agentes["AgentID"] == agent_id, "Horas_Disponibles"] -= duracion# actualizamos horas del día
+                    agentes.loc[agentes["AgentID"] == agent_id, [dia]] += duracion
                     
                     # Remover agente (1 turno por día max)
-                    agent_ids_copy.pop(ptr)
+                    agent_ids_copy.remove(agent_id)
                     break
                 
                 ptr += 1
@@ -162,6 +163,7 @@ def build_coverage_dataframe(
     f_min_full: np.ndarray,
     required_full: np.ndarray,
     covered: np.ndarray,
+    Real_covered: np.ndarray,
     fecha: str
 ) -> pd.DataFrame:
     """
@@ -177,14 +179,15 @@ def build_coverage_dataframe(
     Returns:
         DataFrame con cobertura por intervalo
     """
-    under = np.maximum(required_full - covered, 0)
-    over = np.maximum(covered - required_full, 0)
+    under = np.maximum(required_full - Real_covered, 0)
+    over = np.maximum(Real_covered - required_full, 0)
     
     df = pd.DataFrame({
         "Inicio_min": i_min_full,
         "Fin_min": f_min_full,
         "Requeridos": required_full,
-        "Cubierto": covered,
+        "Ideal_Cubierto": covered,
+        "Real_Cubierto": Real_covered,
         "Under": under,
         "Over": over,
         "Fecha": fecha

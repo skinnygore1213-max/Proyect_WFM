@@ -271,45 +271,34 @@ def select_ilp_shifts(
         - turnos_ilp : DataFrame filtrado (Asignados > 0), index reseteado.
         - real_matrix: np.ndarray de forma (M_ilp, T) con cobertura por turno/intervalo.
     """
-    # 1) Filtrar turnos con demanda positiva para el ILP
+    #Filtrar turnos con demanda positiva para el ILP
     if "Asignados" not in turnos_m.columns:
         raise ValueError("turnos_m debe incluir la columna 'Asignados'.")
+    
+    if "curve_exact" not in turnos_m.columns:
+        raise ValueError("turnos_m debe incluir la columna 'curve_exact'.")
 
     turnos_ilp = turnos_m[turnos_m["Asignados"] > 0].copy().reset_index(drop=True)
 
-    # 2) Validaciones mínimas
-    if turnos_ilp.empty:
-        logger.info("No hay turnos con Asignados > 0. Nada que preparar para ILP.")
-        # Devolvemos matriz vacía (0x0) para mantener contrato de tipos
-        return turnos_ilp, np.zeros((0, 0), dtype=int)
-
-    if "curve_exact" not in turnos_ilp.columns:
-        raise ValueError("turnos_m/turnos_ilp debe incluir la columna 'curve_exact'.")
-
-    # 3) Construir matriz real (MxT)
+    #Construir matriz real (MxT)
     try:
         real_matrix = np.stack(turnos_ilp["curve_exact"].values)  # shape: (M_ilp, T)
     except Exception as e:
         raise ValueError(f"No fue posible apilar 'curve_exact' a matriz: {e}")
 
-    # 4) (Opcional) Crear variables y_r si se provee solver y cap
+    # Crear variables y_r si se provee solver y cap
     if solver is not None and cap_per_shift is not None:
         count_ilp = len(turnos_ilp)
         # Nota: no retornamos 'y_r' porque el contrato del usuario pide
         # solo (Real_Matrix, Turnos_ILP). Si lo requieres luego, podemos añadirlo.
         _ = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(count_ilp)]
 
-    # 5) Logging/print con el mismo contenido de tu snippet
+    # Logging/print
     total_asign = int(turnos_ilp["Asignados"].sum())
     count_ilp = len(turnos_ilp)
-    if n_agents is not None:
-        logger.info(
-            f"ILP result: {total_asign} asignaciones de {count_ilp} turnos (con límite {n_agents})."
-        )
-    else:
-        logger.info(
-            f"ILP result: {total_asign} asignaciones de {count_ilp} turnos."
-        )
+    logger.info(
+        f"ILP result: {int(turnos_ilp["Asignados"].sum())} asignaciones de {len(turnos_ilp)} turnos (con límite {n_agents})."
+    )
 
     return turnos_ilp, real_matrix
 

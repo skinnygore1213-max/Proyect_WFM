@@ -50,6 +50,7 @@ OUTPUT_DIR = "Result"
 OUTPUT_ASSIGNMENT = f"{OUTPUT_DIR}/AsignacionTurnos.xlsx"
 OUTPUT_COVERAGE = f"{OUTPUT_DIR}/CoberturaFinal.xlsx"
 OUTPUT_AGENTS = f"{OUTPUT_DIR}/Agents.xlsx"
+OUTPUT_ILP_RESULTS = f"{OUTPUT_DIR}/ILP_Results.xlsx"
 
 # ============================================================
 # CONFIGURACIÓN DE LECTURA DE DATOS

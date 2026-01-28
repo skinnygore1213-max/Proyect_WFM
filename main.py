@@ -111,6 +111,7 @@ def main():
         
         asignacion_semanal = []
         cobertura_semanal = []
+        ILP_results_semanal = []
         
         for dia in dias_disponibles:
             logger.info("")
@@ -206,14 +207,20 @@ def main():
                 
                 agentes_ids = agentes_disponibles["AgentID"].tolist()
                 asignaciones = assign_shifts_to_agents(
-                    y_val, turnos_m, agentes, agentes_ids
+                    y_val, turnos_ilp, agentes, agentes_ids
                 )
-                
+
                 # Construir dataframes
                 df_asig = build_assignment_dataframe(asignaciones, dia)
-                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_full, covered, dia)
-                
+                turnos_ilp["Real_Agendas"] = (df_asig["TurnoID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
+                Real_covered = np.zeros(48, dtype=int)
+                for j in range(len(turnos_ilp)):
+                    Real_covered += int(turnos_ilp.loc[j, "Real_Agendas"]) * real_matrix[j]
                 asignacion_semanal.append(df_asig)
+                turnos_ilp["Fecha"] = dia
+                ILP_results_semanal.append(turnos_ilp)
+
+                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_full, covered, Real_covered,dia)
                 cobertura_semanal.append(df_cov)
                 
                 logger.info(f"Día {dia} completado: {len(asignaciones)} asignaciones")
@@ -239,6 +246,7 @@ def main():
         # Concatenar resultados semanales
         asignacion_semanal = pd.concat(asignacion_semanal, ignore_index=True)
         cobertura_semanal = pd.concat(cobertura_semanal, ignore_index=True)
+        ILP_results_semanal = pd.concat(ILP_results_semanal, ignore_index=True)
         
         # Formatear cobertura
         cobertura_semanal = format_coverage_for_export(cobertura_semanal)
@@ -248,9 +256,11 @@ def main():
             asignacion_semanal,
             cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Cubierto", "Under", "Over"]],
             agentes,
+            ILP_results_semanal,
             config.OUTPUT_ASSIGNMENT,
             config.OUTPUT_COVERAGE,
-            config.OUTPUT_AGENTS
+            config.OUTPUT_AGENTS,
+            config.OUTPUT_ILP_RESULTS
         )
         
         # ============================================================
