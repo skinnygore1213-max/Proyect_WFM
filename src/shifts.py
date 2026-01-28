@@ -242,3 +242,74 @@ def select_final_shifts(
     logger.info(f"Seleccionados {len(turnos_m)} turnos finales para ILP (matriz {shift_matrix.shape})")
     
     return turnos_m, shift_matrix
+
+
+def select_ilp_shifts(
+    turnos_m: pd.DataFrame,
+    # opcionales si quieres crear las vars aquí (no se devuelven):
+    solver=None,
+    cap_per_shift: int = None,
+    n_agents: int = None,
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """
+    Prepara insumos ILP a partir del set final de turnos (turnos_m):
+
+    - Filtra turnos con Asignados > 0.
+    - Construye matriz Real_Matrix (stack de 'curve_exact').
+    - (Opcional) Crea variables y_r si 'solver' y 'cap_per_shift' están provistos.
+
+    Args:
+        turnos_m: DataFrame con al menos columnas:
+                  - 'Asignados' (int): cupos asignados por turno
+                  - 'curve_exact' (np.ndarray[int]): cobertura 0/1 por intervalo
+        solver:   (opcional) instancia de OR-Tools si deseas crear vars aquí.
+        cap_per_shift: (opcional) cota superior para y_r si creas vars aquí.
+        n_agents: (opcional) solo para logging informativo.
+
+    Returns:
+        (turnos_ilp, real_matrix)
+        - turnos_ilp : DataFrame filtrado (Asignados > 0), index reseteado.
+        - real_matrix: np.ndarray de forma (M_ilp, T) con cobertura por turno/intervalo.
+    """
+    # 1) Filtrar turnos con demanda positiva para el ILP
+    if "Asignados" not in turnos_m.columns:
+        raise ValueError("turnos_m debe incluir la columna 'Asignados'.")
+
+    turnos_ilp = turnos_m[turnos_m["Asignados"] > 0].copy().reset_index(drop=True)
+
+    # 2) Validaciones mínimas
+    if turnos_ilp.empty:
+        logger.info("No hay turnos con Asignados > 0. Nada que preparar para ILP.")
+        # Devolvemos matriz vacía (0x0) para mantener contrato de tipos
+        return turnos_ilp, np.zeros((0, 0), dtype=int)
+
+    if "curve_exact" not in turnos_ilp.columns:
+        raise ValueError("turnos_m/turnos_ilp debe incluir la columna 'curve_exact'.")
+
+    # 3) Construir matriz real (MxT)
+    try:
+        real_matrix = np.stack(turnos_ilp["curve_exact"].values)  # shape: (M_ilp, T)
+    except Exception as e:
+        raise ValueError(f"No fue posible apilar 'curve_exact' a matriz: {e}")
+
+    # 4) (Opcional) Crear variables y_r si se provee solver y cap
+    if solver is not None and cap_per_shift is not None:
+        count_ilp = len(turnos_ilp)
+        # Nota: no retornamos 'y_r' porque el contrato del usuario pide
+        # solo (Real_Matrix, Turnos_ILP). Si lo requieres luego, podemos añadirlo.
+        _ = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(count_ilp)]
+
+    # 5) Logging/print con el mismo contenido de tu snippet
+    total_asign = int(turnos_ilp["Asignados"].sum())
+    count_ilp = len(turnos_ilp)
+    if n_agents is not None:
+        logger.info(
+            f"ILP result: {total_asign} asignaciones de {count_ilp} turnos (con límite {n_agents})."
+        )
+    else:
+        logger.info(
+            f"ILP result: {total_asign} asignaciones de {count_ilp} turnos."
+        )
+
+    return turnos_ilp, real_matrix
+

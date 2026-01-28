@@ -31,7 +31,7 @@ from src.transforms import (
 )
 from src.time_utils import min_to_hhmm
 from src.coverage import detect_time_window, filter_to_window, log_window_info
-from src.shifts import preselect_shifts, compute_exact_curves, select_final_shifts
+from src.shifts import preselect_shifts, compute_exact_curves, select_final_shifts, select_ilp_shifts
 from src.optimization import build_daily_ilp, extract_solution, is_solution_valid
 from src.assignment import (
     assign_shifts_to_agents,
@@ -190,6 +190,17 @@ def main():
                     solver, y, u, o, shift_matrix, required_full
                 )
                 
+                #registrar asignaciones en turnos_m
+                turnos_m["Asignados"] = [int(round(y[j].solution_value())) for j in range(M)]
+
+                #reduce la selección de turnos a los asignados
+                turnos_ilp, real_matrix = select_ilp_shifts(
+                    turnos_m=turnos_m,
+                    solver=solver,                 # opcional
+                    cap_per_shift=config.CAP_PER_SHIFT,   # opcional
+                    n_agents=n_agents              # opcional (solo logging)
+                )
+
                 # -------- 3f. Asignación a agentes --------
                 logger.info(f"Asignando turnos a agentes...")
                 
