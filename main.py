@@ -174,7 +174,7 @@ def main():
             
             solver, y, u, o, M_check, T_check, status = build_daily_ilp(
                 shift_matrix,
-                required_full,
+                required_curva,
                 n_agents,
                 config.ALPHA_UNDER,
                 config.BETA_OVER,
@@ -223,7 +223,7 @@ def main():
                 turnos_ilp["Fecha"] = dia
                 ILP_results_semanal.append(turnos_ilp)
 
-                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_full, covered, Real_covered, dia)
+                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, covered, Real_covered, dia)
                 cobertura_semanal.append(df_cov)
                 
                 logger.info(f"Día {dia} completado: {len(asignaciones)} asignaciones")
