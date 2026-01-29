@@ -74,7 +74,6 @@ def filter_to_window(
         donde T es el número de intervalos dentro de la ventana
     """
     win_mask = (i_min >= window_start) & (f_min <= window_end)
-    
     i_min_w = i_min[win_mask]
     f_min_w = f_min[win_mask]
     required_w = required[win_mask]

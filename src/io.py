@@ -71,6 +71,7 @@ def load_data_bundle(
     curva = load_csv(curva_path, sep=sep, encoding=encoding)
     agentes = load_csv(agentes_path, sep=sep, encoding=encoding)
     turnos = load_csv(turnos_path, sep=sep, encoding=encoding)
+    curva["Req_True"] = (curva["Requeridos"].astype(int) > 0).astype(int)
     
     logger.info("Todos los archivos cargados correctamente")
     return curva, agentes, turnos

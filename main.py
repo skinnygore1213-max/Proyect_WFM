@@ -130,7 +130,7 @@ def main():
 
             # Vectores de datos
             required_curva = curva_dia["Requeridos"].astype(int).values
-            required_full = curva_dia["Requeridos"].astype(int).values
+            required_full = curva_dia["Req_True"].values
             i_min_full = curva_dia["i_min"].values
             f_min_full = curva_dia["f_min"].values
             

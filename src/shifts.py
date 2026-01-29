@@ -38,12 +38,13 @@ def quick_score_shifts(
         cover = (start_m <= itv_start) & (end_m >= itv_end)
         return int(np.dot(cover.astype(int), required))
     
-    scores = turnos.apply(
-        lambda row: score_one(int(row["start_min"]), int(row["end_min"])),
-        axis=1
-    )
-    return scores
-
+    turnos["quick_score"] = np.vectorize(score_one)(turnos["start_min"].values,
+                                                        turnos["end_min"].values)
+    #scores = turnos.apply(
+    #    lambda row: score_one(int(row["start_min"]), int(row["end_min"])),
+    #    axis=1
+    #)
+    return turnos
 
 def preselect_shifts(
     turnos: pd.DataFrame,
@@ -84,10 +85,13 @@ def preselect_shifts(
         raise RuntimeError("Ningún turno pisa la ventana detectada. Revisa la data.")
     
     # Scoring rápido
-    turnos_pref["quick_score"] = quick_score_shifts(
-        turnos_pref, itv_start, itv_end, required
-    )
-    
+    #turnos_pref["quick_score"] = quick_score_shifts(
+    #    turnos_pref, itv_start, itv_end, required
+    #)
+
+    turnos_pref = quick_score_shifts(
+        turnos_pref, itv_start, itv_end, required)
+
     # Seleccionar top K
     turnos_k = turnos_pref.sort_values("quick_score", ascending=False).head(k_preselect).reset_index(drop=True)
     
@@ -219,8 +223,6 @@ def compute_exact_curves(
     df["curve_exact"] = curves
     df["exact_score"] = scores
 
-
-    
     return df
 
 
@@ -258,7 +260,7 @@ def select_final_shifts(
     turnos["score_final"] = turnos["score_hibrido"] - turnos["penal_bin"]
 
     # Elegimos M_FINAL mejores para el ILP
-    turnos_m = turnos.sort_values("exact_score", ascending=False).head(m_final).reset_index(drop=True)
+    turnos_m = turnos.sort_values("score_final", ascending=False).head(m_final).reset_index(drop=True)
     shift_matrix = np.stack(turnos_m["curve_exact"].values)  # shape (M, T)
     
     logger.info(f"Seleccionados {len(turnos_m)} turnos finales para ILP (matriz {shift_matrix.shape})")

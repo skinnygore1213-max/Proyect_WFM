@@ -9,9 +9,9 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Tuple
 import logging
+from src.utils import setup_logging
 
-logger = logging.getLogger(__name__)
-
+logger = setup_logging(__name__, level=logging.INFO)
 
 def assign_shifts_to_agents(
     y_val: np.ndarray,
