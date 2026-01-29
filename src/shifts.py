@@ -218,6 +218,8 @@ def compute_exact_curves(
     
     df["curve_exact"] = curves
     df["exact_score"] = scores
+
+
     
     return df
 
@@ -238,6 +240,24 @@ def select_final_shifts(
         - turnos_m: DataFrame de M mejores turnos
         - shift_matrix: ndarray (M, T) con cobertura por turno/intervalo
     """
+    # score por hora + híbrido
+    turnos["score_por_h"]  = turnos["exact_score"] / turnos["Duracion_Horas"].clip(lower=0.25)
+    turnos["score_hibrido"] = config.α*turnos["exact_score"] + config.β*turnos["score_por_h"]
+
+    # penalización por bin de duración
+    def bin_duracion(h):
+        if h < 7:   return "lt7"
+        if h < 8:   return "7_8"
+        if h < 9:   return "8_9"
+        return "ge9"
+
+    turnos["dur_bin"] = turnos["Duracion_Horas"].apply(bin_duracion)
+    freq_bin = turnos["dur_bin"].value_counts().to_dict()
+    λ = 0.15
+    turnos["penal_bin"] = turnos["dur_bin"].map(lambda b: λ*np.log1p(freq_bin[b]))
+    turnos["score_final"] = turnos["score_hibrido"] - turnos["penal_bin"]
+
+    # Elegimos M_FINAL mejores para el ILP
     turnos_m = turnos.sort_values("exact_score", ascending=False).head(m_final).reset_index(drop=True)
     shift_matrix = np.stack(turnos_m["curve_exact"].values)  # shape (M, T)
     

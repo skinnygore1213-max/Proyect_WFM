@@ -32,6 +32,9 @@ CAP_PER_SHIFT = 30               # máximo agentes por turno (evita "planitud")
 SEG_WIDTH = 15                   # ancho de segmento para coste marginal creciente
 SEG_MULT_STEP = 0.15             # incremento % por segmento (15% más caro)
 NOISE_EPS = 0.02                 # ruido relativo para romper empates
+# pesos para score híbrido
+α = 0.6      # alfa= peso de exact_score o cubrimiento de curva
+β = 0.4      # beta= peso de score por hora
 
 # ============================================================
 # REPRODUCIBILIDAD
