@@ -29,6 +29,7 @@ GAMMA_HEAD = 0.001               # penalización por cantidad de turnos
 # RESTRICCIONES DE CAPACIDAD Y DIVERSIDAD
 # ============================================================
 CAP_PER_SHIFT = 30               # máximo agentes por turno (evita "planitud")
+CAP_PER_INTENSITY = 4            # máximo de turnos por intensidad (nueva restricción)
 SEG_WIDTH = 15                   # ancho de segmento para coste marginal creciente
 SEG_MULT_STEP = 0.15             # incremento % por segmento (15% más caro)
 NOISE_EPS = 0.02                 # ruido relativo para romper empates

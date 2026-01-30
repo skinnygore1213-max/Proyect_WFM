@@ -165,7 +165,8 @@ def main():
             #logger.info(f"Cálculo de curvas exactas para M={config.M_FINAL}...")
             
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
-            turnos_m, shift_matrix = select_final_shifts(turnos_k, config.M_FINAL)
+            turnos_m, shift_matrix = select_final_shifts(turnos_k, config.M_FINAL,config.CAP_PER_INTENSITY)            
+
             M = shift_matrix.shape[0]
             #logger.info(f"Matriz de cobertura: {M} turnos × 48 intervalos")
             
@@ -201,7 +202,6 @@ def main():
                     turnos_m=turnos_m,
                     solver=solver,                 # opcional
                     cap_per_shift=config.CAP_PER_SHIFT,   # opcional
-                  
                     n_agents=n_agents              # opcional (solo logging)
                 )
 

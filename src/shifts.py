@@ -228,8 +228,9 @@ def compute_exact_curves(
 
 def select_final_shifts(
     turnos: pd.DataFrame,
-    m_final: int
-) -> Tuple[pd.DataFrame, np.ndarray]:
+    m_final: int,
+    cap_per_intensity: int
+    ) -> Tuple[pd.DataFrame, np.ndarray]:
     """
     Selecciona M mejores turnos por exact_score y construye matriz de cobertura.
     
@@ -259,14 +260,85 @@ def select_final_shifts(
     turnos["penal_bin"] = turnos["dur_bin"].map(lambda b: λ*np.log1p(freq_bin[b]))
     turnos["score_final"] = turnos["score_hibrido"] - turnos["penal_bin"]
 
-    # Elegimos M_FINAL mejores para el ILP
-    turnos_m = turnos.sort_values("score_final", ascending=False).head(m_final).reset_index(drop=True)
-    shift_matrix = np.stack(turnos_m["curve_exact"].values)  # shape (M, T)
-    
-    logger.info(f"Seleccionados {len(turnos_m)} turnos finales para ILP (matriz {shift_matrix.shape})")
-    
-    return turnos_m, shift_matrix
+    # 1) Cuantizar intensidad
+    turnos["intensity"] = turnos["Duracion_Horas"].astype(float).apply(lambda h: (round(h / 0.5) * 0.5))
 
+    # 2) Ordenar por score
+    turnos = turnos.sort_values("score_final", ascending=False)
+
+    # 3) Top cap por intensidad
+    groups = []
+    for intensity, g in turnos.groupby("intensity", sort=False):
+        g_top = g.head(cap_per_intensity)
+        groups.append(g_top)
+
+    prepool = pd.concat(groups, ignore_index=True)
+
+    # 4) Si faltan para llegar a M_FINAL, rellenar round-robin entre intensidades
+    if len(prepool) >= m_final:
+        return prepool.head(m_final).reset_index(drop=True)
+
+    # Construir colas por intensidad con los excedentes no tomados en el cap inicial
+    taken_idx = set(prepool.index)
+    # OJO: índices de prepool son nuevos; rehagamos 'taken' por _id_ estable:
+    # Solución robusta: usar un id estable, por ejemplo el índice original:
+    tk = turnos.reset_index().rename(columns={"index": "_orig_idx"})
+    # recomputar cap inicial sobre tk con _orig_idx
+    cap_map = {}
+    for intensity, g in tk.groupby("intensity", sort=False):
+        cap_map[intensity] = set(g.head(cap_per_intensity)["_orig_idx"].tolist())
+
+    # prepool robusto por _orig_idx
+    prepool_mask = tk.apply(lambda r: r["_orig_idx"] in cap_map.get(r["intensity"], set()), axis=1)
+    prepool_df = tk[prepool_mask].copy()
+
+    # excedentes por intensidad (cola para round-robin)
+    rr_queues = {}
+    for intensity, g in tk.groupby("intensity", sort=False):
+        rr = g[~g["_orig_idx"].isin(cap_map.get(intensity, set()))]
+        rr_queues[intensity] = rr.copy()
+
+    # cuanto falta
+    remaining = m_final - len(prepool_df)
+
+    # round-robin: recorrer intensidades en orden de aparición de score
+    intensity_order = list(tk["intensity"].drop_duplicates())
+
+    rr_picks = []
+    ptr = 0
+    while remaining > 0 and len(intensity_order) > 0:
+        intensity = intensity_order[ptr % len(intensity_order)]
+        queue = rr_queues.get(intensity, None)
+        if queue is None or queue.empty:
+            # descartar intensidades vacías del round-robin
+            intensity_order = [x for x in intensity_order if x != intensity]
+            if not intensity_order:
+                break
+            ptr += 1
+            continue
+
+        pick_row = queue.iloc[[0]]  # mejor score restante de esa intensidad
+        rr_picks.append(pick_row)
+        # quitarlo de la cola
+        rr_queues[intensity] = queue.iloc[1:].copy()
+        remaining -= 1
+        ptr += 1
+
+    # Consolidar final
+    if rr_picks:
+        rr_block = pd.concat(rr_picks, ignore_index=True)
+        final_df = pd.concat([prepool_df, rr_block], ignore_index=True)
+    else:
+        final_df = prepool_df
+
+    # Orden final por score y recorte exacto
+    # Elegimos M_FINAL mejores para el ILP
+    final_df = final_df.sort_values("score_final", ascending=False).head(m_final).reset_index(drop=True)
+    shift_matrix = np.stack(final_df["curve_exact"].values)  # shape (M, T)
+  
+    logger.info(f"Seleccionados {len(final_df)} turnos finales para ILP (matriz {shift_matrix.shape})")
+    
+    return final_df, shift_matrix
 
 def select_ilp_shifts(
     turnos_m: pd.DataFrame,
@@ -322,4 +394,3 @@ def select_ilp_shifts(
     )
 
     return turnos_ilp, real_matrix
-
