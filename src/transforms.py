@@ -180,12 +180,15 @@ def filter_by_date(curva: pd.DataFrame) -> list:
     Returns:
         Lista de fechas únicas ordenadas
     """
-    return sorted(curva['Fecha'].unique())
+    curva =sorted(curva['Fecha'].unique())
+    #curva["dia"] = pd.to_datetime(curva["Fecha"],format="%ddd")
+
+    return curva
 
 
 def filter_available_agents(
     agentes: pd.DataFrame, 
-    disponible_col: str = 'Disponible',
+    disponible_col: str,
     hours_available_col: str = 'Horas_Disponibles'
 ) -> pd.DataFrame:
     """

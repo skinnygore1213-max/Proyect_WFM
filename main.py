@@ -14,6 +14,7 @@ Resultado:
     - Result/Agents.xlsx
 """
 
+import datetime as dt
 import sys
 import logging
 import numpy as np
@@ -101,6 +102,7 @@ def main():
         
         # Fechas disponibles
         dias_disponibles = filter_by_date(curva)
+
         logger.info(f"Días a procesar: {len(dias_disponibles)}")
         
         # ============================================================
@@ -115,17 +117,21 @@ def main():
         ILP_results_semanal = []
         Turnos_K_Week = []
         
+        
         for dia in dias_disponibles:
+            dia_w = dt.datetime.strptime(dia, "%d/%m/%Y").date().strftime('%A')
+            #dia_w.upper()
             logger.info("")
             logger.info(f"{'*'*70}")
             logger.info(f"Procesando: {dia}")
+            logger.info(f"Procesando: {dia_w}")
             logger.info(f"{'*'*70}")
             
             # Filtrar curva del día
             curva_dia = curva[curva['Fecha'] == dia].copy()
             
             # Agentes disponibles
-            agentes_disponibles = filter_available_agents(agentes)
+            agentes_disponibles = filter_available_agents(agentes,dia_w)
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
             agentes[dia] = 0
@@ -269,8 +275,8 @@ def main():
                 agentes[dia] = 0
             
             # Actualizar agentes disponibles
-            agentes_disponibles = filter_available_agents(agentes)
-            logger.info(f"Agentes con horas disponibles para próximo día: {len(agentes_disponibles)}")
+            #agentes_disponibles = filter_available_agents(agentes)
+            #logger.info(f"Agentes con horas disponibles para próximo día: {len(agentes_disponibles)}")
         
         # ============================================================
         # 4. EXPORTACIÓN DE RESULTADOS
