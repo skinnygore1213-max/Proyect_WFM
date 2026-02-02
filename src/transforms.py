@@ -120,27 +120,30 @@ def process_turnos_catalog(turnos: pd.DataFrame) -> pd.DataFrame:
     
     return df
 
-
 def process_agentes_catalog(agentes: pd.DataFrame, max_hours_week: int) -> pd.DataFrame:
-    """
-    Inicializa el catálogo de agentes con columnas de seguimiento.
-    
-    Agrega:
-    - Horas_Disponibles (inicialmente = max_hours_week)
-    - Horas_Asignadas (inicialmente = 0)
-    
-    Args:
-        agentes: DataFrame con información base de agentes
-        max_hours_week: Máximo de horas semanales permitidas
-        
-    Returns:
-        DataFrame con columnas de seguimiento inicializadas
-    """
-    df = agentes.copy()
+    df = _normalize_columns(agentes)
+
+    # 1) Detectar columna de disponibilidad (sin romper si cambió de nombre)
+    if "Disponible" not in df.columns:
+        candidates = ["Avail", "Available", "Disponibilidad", "Disponibles", "DISPONIBLE"]
+        found = next((c for c in candidates if c in df.columns), None)
+
+        if found is not None:
+            df["Disponible"] = df[found]
+            logger.warning(f"No existe 'Disponible'. Usando '{found}' como disponibilidad.")
+        else:
+            # si no existe ninguna, asumimos todos disponibles (o puedes asumir 0 si prefieres)
+            df["Disponible"] = 1
+            logger.warning("No existe columna de disponibilidad. Se asume Disponible=1 para todos.")
+
+    # 2) Normalizar a 0/1
+    df["Disponible"] = _to_binary_available(df["Disponible"])
+
+    # 3) Tracking de horas
     df["Horas_Disponibles"] = max_hours_week
     df["Horas_Asignadas"] = 0
-    return df
 
+    return df
 
 def convert_to_minutes(curva: pd.DataFrame) -> pd.DataFrame:
     """
@@ -203,6 +206,42 @@ def filter_available_agents(
     df = df[df[hours_available_col] > 0].copy()
     return df.reset_index(drop=True)
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+def _normalize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    df.columns = (
+        df.columns.astype(str)
+        .str.replace("\ufeff", "", regex=False)  # quita BOM si viene en el header
+        .str.strip()                             # quita espacios al inicio/fin
+    )
+    return df
+
+def _to_binary_available(s: pd.Series) -> pd.Series:
+    # Convierte varios formatos a 0/1: 1/0, True/False, SI/NO, YES/NO, etc.
+    s2 = s.astype(str).str.strip().str.lower()
+
+    mapping = {
+        "1": 1, "0": 0,
+        "true": 1, "false": 0,
+        "si": 1, "sí": 1, "no": 0,
+        "yes": 1, "y": 1, "n": 0,
+        "disponible": 1, "nodisponible": 0,
+        "": 0, "nan": 0
+    }
+
+    out = s2.map(mapping)
+
+    # si no mapeó, intenta numérico
+    out = out.fillna(pd.to_numeric(s2, errors="coerce"))
+
+    # default 0 si sigue NaN
+    out = out.fillna(0).astype(int)
+
+    # fuerza binario
+    return out.clip(0, 1)
 
 def safe_numeric(series: pd.Series, fillna_value: int = 0) -> pd.Series:
     """
