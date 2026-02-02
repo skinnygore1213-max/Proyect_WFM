@@ -255,9 +255,9 @@ def select_final_shifts(
         if h < 5:   return "4_5"
         if h < 6:   return "5_6"
         if h < 7:   return "6_7"
-        if h < 8:   return "7_8"
-        if h < 9:   return "8_9"
-        return "ge9"
+        #if h < 8:   return "7_8"
+        #if h < 9:   return "8_9"
+        return "ge7"
 
     turnos["dur_bin"] = turnos["Duracion_Horas"].apply(bin_duracion)
     freq_bin = turnos["dur_bin"].value_counts().to_dict()

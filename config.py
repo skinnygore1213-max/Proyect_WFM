@@ -16,8 +16,8 @@ REST_MIN_GAP = 12 * 60           # descanso mínimo entre días (minutos, ej: 11
 # ============================================================
 # PARÁMETROS DE OPTIMIZACIÓN ILP/HEURÍSTICA
 # ============================================================
-K_PRESELECT = 500                # turnos preseleccionados por quick_score
-M_FINAL = 300                    # turnos que entran al ILP final
+K_PRESELECT = 300                # turnos preseleccionados por quick_score
+M_FINAL = 100                    # turnos que entran al ILP final
 SOLVER_MS = 20000                # tiempo límite del solver (ms)
 
 # Pesos en la función objetivo
@@ -28,11 +28,11 @@ GAMMA_HEAD = 0.001               # penalización por cantidad de turnos
 # ============================================================
 # RESTRICCIONES DE CAPACIDAD Y DIVERSIDAD
 # ============================================================
-CAP_PER_SHIFT = 25               # máximo agentes por turno (evita "planitud")
+CAP_PER_SHIFT = 15               # máximo agentes por turno (evita "planitud")
 CAP_PER_INTENSITY = 4            # máximo de turnos por intensidad (nueva restricción)
-SEG_WIDTH = 15                   # ancho de segmento para coste marginal creciente
-SEG_MULT_STEP = 0.15             # incremento % por segmento (15% más caro)
-NOISE_EPS = 0.02                 # ruido relativo para romper empates
+SEG_WIDTH = 10                   # ancho de segmento para coste marginal creciente
+SEG_MULT_STEP = 0.35             # incremento % por segmento (15% más caro)
+NOISE_EPS = 0.05                 # ruido relativo para romper empates
 # pesos para score híbrido
 α = 0.55      # alfa= peso de exact_score o cubrimiento de curva
 β = 0.45      # beta= peso de score por hora

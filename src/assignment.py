@@ -90,7 +90,7 @@ def assign_shifts_to_agents(
         if ptr >= len(agent_ids_copy):
             logger.warning(f"No hay agentes disponibles para turno {turno_id}")
     
-    logger.info(f"Asignadas {len(asignaciones)} asignaciones de turnos")
+    #logger.info(f"Asignadas {len(asignaciones)} asignaciones de turnos")
     
     return asignaciones
 
