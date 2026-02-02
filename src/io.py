@@ -125,10 +125,12 @@ def export_assignment_results(
     cobertura_semanal: pd.DataFrame,
     agentes_final: pd.DataFrame,
     ILP_results_semanal: pd.DataFrame,
+    turnos_k_semanal: pd.DataFrame,
     output_assignment: str,
     output_coverage: str,
     output_agents: str,
-    output_ilp_results: str
+    output_ilp_results: str,
+    output_turnos_k: str
 ) -> None:
     """
     Exporta los 3 archivos de resultado.
@@ -145,6 +147,7 @@ def export_assignment_results(
     export_dataframe(cobertura_semanal, output_coverage, index=False)
     export_dataframe(agentes_final, output_agents, index=False)
     export_dataframe(ILP_results_semanal, output_ilp_results, index=False)
+    export_dataframe(turnos_k_semanal, output_turnos_k, index=False)
     
     logger.info("Resultados finales exportados")
 

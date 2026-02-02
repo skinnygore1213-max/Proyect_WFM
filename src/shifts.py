@@ -6,7 +6,7 @@ Preselección heurística rápida, scoring y gestión de turnos.
 
 import pandas as pd
 import numpy as np
-from typing import Tuple
+from typing import List, Tuple
 import logging
 from src.utils import setup_logging
 import config
@@ -53,6 +53,7 @@ def preselect_shifts(
     itv_start: np.ndarray,
     itv_end: np.ndarray,
     required: np.ndarray,
+    cap_per_intensity: int,
     k_preselect: int
 ) -> pd.DataFrame:
     """
@@ -85,19 +86,19 @@ def preselect_shifts(
         raise RuntimeError("Ningún turno pisa la ventana detectada. Revisa la data.")
     
     # Scoring rápido
-    #turnos_pref["quick_score"] = quick_score_shifts(
-    #    turnos_pref, itv_start, itv_end, required
-    #)
-
     turnos_pref = quick_score_shifts(
         turnos_pref, itv_start, itv_end, required)
-
+    
+    # 1) Cuantizar intensidad
+    turnos_pref["intensity"] = turnos_pref["Duracion_Horas"].astype(float).apply(lambda h: (round(h / 0.5) * 0.5))
+    
     # Seleccionar top K
-    turnos_k = turnos_pref.sort_values("quick_score", ascending=False).head(k_preselect).reset_index(drop=True)
     
-    logger.info(f"Preseleccionados {len(turnos_k)} turnos de {len(turnos_pref)} solapantes")
+    #turnos_k = turnos_pref.sort_values("quick_score", ascending=False).head(k_preselect).reset_index(drop=True)
     
-    return turnos_k
+    logger.info(f"Preseleccionados {len(turnos_pref)} turnos solapantes")
+    
+    return turnos_pref
 
 
 def build_exact_coverage_vector(
@@ -228,6 +229,7 @@ def compute_exact_curves(
 
 def select_final_shifts(
     turnos: pd.DataFrame,
+    score_column: str,
     m_final: int,
     cap_per_intensity: int
     ) -> Tuple[pd.DataFrame, np.ndarray]:
@@ -244,12 +246,15 @@ def select_final_shifts(
         - shift_matrix: ndarray (M, T) con cobertura por turno/intervalo
     """
     # score por hora + híbrido
-    turnos["score_por_h"]  = turnos["exact_score"] / turnos["Duracion_Horas"].clip(lower=0.25)
-    turnos["score_hibrido"] = config.α*turnos["exact_score"] + config.β*turnos["score_por_h"]
+    turnos["score_por_h"]  = turnos[score_column] / turnos["Duracion_Horas"].clip(lower=0.25)
+    turnos["score_hibrido"] = config.α*turnos[score_column] + config.β*turnos["score_por_h"]
 
     # penalización por bin de duración
     def bin_duracion(h):
-        if h < 7:   return "lt7"
+        if h < 4:   return "lt4"
+        if h < 5:   return "4_5"
+        if h < 6:   return "5_6"
+        if h < 7:   return "6_7"
         if h < 8:   return "7_8"
         if h < 9:   return "8_9"
         return "ge9"
@@ -260,12 +265,85 @@ def select_final_shifts(
     turnos["penal_bin"] = turnos["dur_bin"].map(lambda b: λ*np.log1p(freq_bin[b]))
     turnos["score_final"] = turnos["score_hibrido"] - turnos["penal_bin"]
 
-    # 1) Cuantizar intensidad
-    turnos["intensity"] = turnos["Duracion_Horas"].astype(float).apply(lambda h: (round(h / 0.5) * 0.5))
+    # Orden final por score y recorte exacto
+    # Elegimos M_FINAL mejores para el ILP
+    #final_df = turnos.sort_values("score_final", ascending=False).head(m_final).reset_index(drop=True)
+    #shift_matrix = np.stack(final_df["curve_exact"].values)  # shape (M, T)
+  
+    #logger.info(f"Seleccionados {len(final_df)} turnos finales para ILP (M={m_final})")
+    
+    return turnos
 
+def select_ilp_shifts(
+    turnos_m: pd.DataFrame,
+    # opcionales si quieres crear las vars aquí (no se devuelven):
+    solver=None,
+    cap_per_shift: int = None,
+    n_agents: int = None,
+) -> Tuple[pd.DataFrame, np.ndarray]:
+    """
+    Prepara insumos ILP a partir del set final de turnos (turnos_m):
+
+    - Filtra turnos con Asignados > 0.
+    - Construye matriz Real_Matrix (stack de 'curve_exact').
+    - (Opcional) Crea variables y_r si 'solver' y 'cap_per_shift' están provistos.
+
+    Args:
+        turnos_m: DataFrame con al menos columnas:
+                  - 'Asignados' (int): cupos asignados por turno
+                  - 'curve_exact' (np.ndarray[int]): cobertura 0/1 por intervalo
+        solver:   (opcional) instancia de OR-Tools si deseas crear vars aquí.
+        cap_per_shift: (opcional) cota superior para y_r si creas vars aquí.
+        n_agents: (opcional) solo para logging informativo.
+
+    Returns:
+        (turnos_ilp, real_matrix)
+        - turnos_ilp : DataFrame filtrado (Asignados > 0), index reseteado.
+        
+    """
+    #Filtrar turnos con demanda positiva para el ILP
+    if "Asignados" not in turnos_m.columns:
+        raise ValueError("turnos_m debe incluir la columna 'Asignados'.")
+    
+    if "curve_exact" not in turnos_m.columns:
+        raise ValueError("turnos_m debe incluir la columna 'curve_exact'.")
+
+    turnos_ilp = turnos_m[turnos_m["Asignados"] > 0].copy().reset_index(drop=True)
+
+    # Crear variables y_r si se provee solver y cap
+    if solver is not None and cap_per_shift is not None:
+        # Nota: no retornamos 'y_r' porque el contrato del usuario pide
+        # solo (Real_Matrix, Turnos_ILP). Si lo requieres luego, podemos añadirlo.
+        _ = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(len(turnos_ilp))]
+
+    # Logging/print
+    logger.info(
+        f"ILP result: {int(turnos_ilp["Asignados"].sum())} asignaciones de {len(turnos_ilp)} turnos (con límite {n_agents})."
+    )
+
+    return turnos_ilp
+
+def select_shifts_by_intensity(
+    turnos: pd.DataFrame,
+    score_column: str,
+    n_preselect: int,
+    cap_per_intensity: int
+    #intensity_levels: List[float],
+) -> pd.DataFrame:
+    """
+    Selecciona turnos por niveles de intensidad, limitando por cap por nivel.
+    
+    Args:
+        turnos: DataFrame de turnos con columna 'Duracion_Horas'
+        intensity_levels: Lista de niveles de intensidad (horas)
+        cap_per_intensity: Límite de turnos a seleccionar por nivel
+    Returns:
+        DataFrame de turnos seleccionados
+    """
+    
     # 2) Ordenar por score
-    turnos = turnos.sort_values("score_final", ascending=False)
-
+    turnos = turnos.sort_values(score_column, ascending=False)
+    
     # 3) Top cap por intensidad
     groups = []
     for intensity, g in turnos.groupby("intensity", sort=False):
@@ -275,8 +353,8 @@ def select_final_shifts(
     prepool = pd.concat(groups, ignore_index=True)
 
     # 4) Si faltan para llegar a M_FINAL, rellenar round-robin entre intensidades
-    if len(prepool) >= m_final:
-        return prepool.head(m_final).reset_index(drop=True)
+    if len(prepool) >= n_preselect:
+        return prepool.head(n_preselect).reset_index(drop=True)
 
     # Construir colas por intensidad con los excedentes no tomados en el cap inicial
     taken_idx = set(prepool.index)
@@ -299,7 +377,7 @@ def select_final_shifts(
         rr_queues[intensity] = rr.copy()
 
     # cuanto falta
-    remaining = m_final - len(prepool_df)
+    remaining = n_preselect - len(prepool_df)
 
     # round-robin: recorrer intensidades en orden de aparición de score
     intensity_order = list(tk["intensity"].drop_duplicates())
@@ -331,66 +409,34 @@ def select_final_shifts(
     else:
         final_df = prepool_df
 
-    # Orden final por score y recorte exacto
-    # Elegimos M_FINAL mejores para el ILP
-    final_df = final_df.sort_values("score_final", ascending=False).head(m_final).reset_index(drop=True)
-    shift_matrix = np.stack(final_df["curve_exact"].values)  # shape (M, T)
-  
-    logger.info(f"Seleccionados {len(final_df)} turnos finales para ILP (matriz {shift_matrix.shape})")
+    # Volver a las columnas originales (quitamos auxiliares)
+    final_df = final_df.drop(columns=["_orig_idx"], errors="ignore").reset_index(drop=True)
+    # Seleccionar top K
+    turnos_k = final_df.sort_values(score_column, ascending=False).head(n_preselect).reset_index(drop=True)
+        
+    logger.info(f"Preseleccionados {len(turnos_k)} turnos de {len(turnos)} procesados por intensidad.")
     
-    return final_df, shift_matrix
+    return turnos_k
 
-def select_ilp_shifts(
-    turnos_m: pd.DataFrame,
-    # opcionales si quieres crear las vars aquí (no se devuelven):
-    solver=None,
-    cap_per_shift: int = None,
-    n_agents: int = None,
+def prepare_ilp_inputs(
+    turnos: pd.DataFrame,
 ) -> Tuple[pd.DataFrame, np.ndarray]:
     """
     Prepara insumos ILP a partir del set final de turnos (turnos_m):
 
     - Filtra turnos con Asignados > 0.
-    - Construye matriz Real_Matrix (stack de 'curve_exact').
-    - (Opcional) Crea variables y_r si 'solver' y 'cap_per_shift' están provistos.
+    - Construye matriz Matrix (stack de 'curve_exact').
 
     Args:
         turnos_m: DataFrame con al menos columnas:
                   - 'Asignados' (int): cupos asignados por turno
                   - 'curve_exact' (np.ndarray[int]): cobertura 0/1 por intervalo
-        solver:   (opcional) instancia de OR-Tools si deseas crear vars aquí.
-        cap_per_shift: (opcional) cota superior para y_r si creas vars aquí.
-        n_agents: (opcional) solo para logging informativo.
-
-    Returns:
-        (turnos_ilp, real_matrix)
-        - turnos_ilp : DataFrame filtrado (Asignados > 0), index reseteado.
-        - real_matrix: np.ndarray de forma (M_ilp, T) con cobertura por turno/intervalo.
+    Returns:    matrix para cobertura de turnos/intervalos
     """
-    #Filtrar turnos con demanda positiva para el ILP
-    if "Asignados" not in turnos_m.columns:
-        raise ValueError("turnos_m debe incluir la columna 'Asignados'.")
-    
-    if "curve_exact" not in turnos_m.columns:
-        raise ValueError("turnos_m debe incluir la columna 'curve_exact'.")
-
-    turnos_ilp = turnos_m[turnos_m["Asignados"] > 0].copy().reset_index(drop=True)
-
-    #Construir matriz real (MxT)
+#Construir matriz real (MxT)
     try:
-        real_matrix = np.stack(turnos_ilp["curve_exact"].values)  # shape: (M_ilp, T)
+        return_matrix = np.stack(turnos["curve_exact"].values)  # shape: (M_ilp, T)
     except Exception as e:
         raise ValueError(f"No fue posible apilar 'curve_exact' a matriz: {e}")
-
-    # Crear variables y_r si se provee solver y cap
-    if solver is not None and cap_per_shift is not None:
-        # Nota: no retornamos 'y_r' porque el contrato del usuario pide
-        # solo (Real_Matrix, Turnos_ILP). Si lo requieres luego, podemos añadirlo.
-        _ = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(len(turnos_ilp))]
-
-    # Logging/print
-    logger.info(
-        f"ILP result: {int(turnos_ilp["Asignados"].sum())} asignaciones de {len(turnos_ilp)} turnos (con límite {n_agents})."
-    )
-
-    return turnos_ilp, real_matrix
+    
+    return return_matrix

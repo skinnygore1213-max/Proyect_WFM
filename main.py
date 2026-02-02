@@ -31,7 +31,7 @@ from src.transforms import (
 )
 from src.time_utils import min_to_hhmm
 from src.coverage import detect_time_window, filter_to_window, log_window_info
-from src.shifts import preselect_shifts, compute_exact_curves, select_final_shifts, select_ilp_shifts
+from src.shifts import prepare_ilp_inputs, preselect_shifts, compute_exact_curves, select_final_shifts, select_ilp_shifts, select_shifts_by_intensity
 from src.optimization import build_daily_ilp, extract_solution, is_solution_valid
 from src.assignment import (
     assign_shifts_to_agents,
@@ -112,6 +112,7 @@ def main():
         asignacion_semanal = []
         cobertura_semanal = []
         ILP_results_semanal = []
+        Turnos_K_Week = []
         
         for dia in dias_disponibles:
             logger.info("")
@@ -158,14 +159,42 @@ def main():
                 i_min,
                 f_min,
                 required,
+                config.CAP_PER_INTENSITY,
                 config.K_PRESELECT
+            )
+
+            turnos_k = select_final_shifts(
+                turnos_k,
+                "quick_score",
+                config.M_FINAL,
+                config.CAP_PER_INTENSITY
+            )
+            turnos_k = select_shifts_by_intensity(
+                turnos_k,
+                score_column="score_final",
+                n_preselect=config.K_PRESELECT,
+                cap_per_intensity=config.CAP_PER_INTENSITY
             )
             
             # -------- 3c. Curvas exactas --------
             #logger.info(f"Cálculo de curvas exactas para M={config.M_FINAL}...")
             
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
-            turnos_m, shift_matrix = select_final_shifts(turnos_k, config.M_FINAL,config.CAP_PER_INTENSITY)            
+            turnos_k["Fecha"] = dia
+            
+            turnos_m = select_final_shifts(
+                turnos_k,
+                "exact_score",
+                config.M_FINAL,
+                config.CAP_PER_INTENSITY
+            )
+            turnos_m = select_shifts_by_intensity(
+                turnos_k,
+                score_column="score_final",
+                n_preselect=config.M_FINAL,
+                cap_per_intensity=config.CAP_PER_INTENSITY
+            )
+            shift_matrix = prepare_ilp_inputs(turnos_m)
 
             M = shift_matrix.shape[0]
             #logger.info(f"Matriz de cobertura: {M} turnos × 48 intervalos")
@@ -198,12 +227,14 @@ def main():
                 turnos_m["Asignados"] = [int(round(y[j].solution_value())) for j in range(M)]
 
                 #reduce la selección de turnos a los asignados
-                turnos_ilp, real_matrix = select_ilp_shifts(
+                turnos_ilp  = select_ilp_shifts(
                     turnos_m=turnos_m,
                     solver=solver,                 # opcional
                     cap_per_shift=config.CAP_PER_SHIFT,   # opcional
                     n_agents=n_agents              # opcional (solo logging)
                 )
+
+                real_matrix = prepare_ilp_inputs(turnos_ilp)
 
                 # -------- 3f. Asignación a agentes --------
                 logger.info(f"Asignando turnos a agentes...")
@@ -225,7 +256,8 @@ def main():
 
                 df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, covered, Real_covered, dia)
                 cobertura_semanal.append(df_cov)
-                
+                Turnos_K_Week.append(turnos_k)
+
                 logger.info(f"Día {dia} completado: {len(asignaciones)} asignaciones")
                 
             else:
@@ -250,6 +282,7 @@ def main():
         asignacion_semanal = pd.concat(asignacion_semanal, ignore_index=True)
         cobertura_semanal = pd.concat(cobertura_semanal, ignore_index=True)
         ILP_results_semanal = pd.concat(ILP_results_semanal, ignore_index=True)
+        Turnos_K_Week = pd.concat(Turnos_K_Week, ignore_index=True)
         
         # Formatear cobertura
         cobertura_semanal = format_coverage_for_export(cobertura_semanal)
@@ -260,10 +293,12 @@ def main():
             cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Ideal_Cubierto","Real_Cubierto" ,"Under", "Over"]],
             agentes,
             ILP_results_semanal,
+            Turnos_K_Week,
             config.OUTPUT_ASSIGNMENT,
             config.OUTPUT_COVERAGE,
             config.OUTPUT_AGENTS,
-            config.OUTPUT_ILP_RESULTS
+            config.OUTPUT_ILP_RESULTS,
+            config.OUTPUT_TURNOS_K
         )
         
         # ============================================================
