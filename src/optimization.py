@@ -3,11 +3,17 @@ Módulo de optimización ILP.
 
 Construye y resuelve el ILP compacto diario usando OR-Tools (SCIP).
 Incluye coste marginal creciente y penalizaciones under/over.
+
+IMPORTANTE (nueva lógica en minutos):
+  - shift_matrix[j,t] representa MINUTOS (0..30) cubiertos por turno j en intervalo t
+  - required_full[t] viene en AGENTES, pero la restricción usa required_full[t] * 30 (minutos)
+  - u/o están en MINUTOS
+  - costos under/over se escalan por 30 para mantener equivalencia a “agentes”
 """
 
 import numpy as np
 from ortools.linear_solver import pywraplp
-from typing import Tuple, List
+from typing import Tuple, List, Dict
 import logging
 
 logger = logging.getLogger(__name__)
@@ -26,110 +32,87 @@ def build_daily_ilp(
     noise_eps: float,
     solver_ms: int = 20000,
     random_seed: int = 42
-) -> Tuple[pywraplp.Solver, List, List, List, int, int, np.ndarray]:
+) -> Tuple[pywraplp.Solver, List, List, List, int, int, int]:
     """
-    Construye el modelo ILP diario con coste marginal creciente.
-    
-    Variables:
-    - y[j]: número de agentes asignados al turno j (0 <= y[j] <= cap_per_shift)
-    - u[t]: undercoverage en intervalo t
-    - o[t]: overcoverage en intervalo t
-    - seg[j][k]: segmentos para coste marginal creciente
-    
-    Restricciones:
-    1. Balance por intervalo: sum_j y[j] * cobertura[j,t] - required[t] = o[t] - u[t]
-    2. Capacidad total: sum_j y[j] <= n_agents
-    3. Segmentación: sum_k seg[j][k] = y[j]
-    
-    Objetivo:
-    Minimizar: alpha_under * sum_u + beta_over * sum_o + costo_marginal_creciente
-    
-    Args:
-        shift_matrix: ndarray (M, T) con cobertura por turno/intervalo
-        required_full: ndarray (T,) de requeridos
-        n_agents: Número de agentes disponibles
-        alpha_under: Penalización por undercoverage
-        beta_over: Penalización por overcoverage
-        gamma_head: Costo base por agente/turno
-        cap_per_shift: Tope máximo de agentes por turno
-        seg_width: Ancho de segmento para coste marginal
-        seg_mult_step: Multiplicador de incremento por segmento
-        noise_eps: Ruido relativo para romper empates
-        solver_ms: Tiempo límite del solver (ms)
-        random_seed: Semilla para reproducibilidad
-        
+    Construye y resuelve el ILP diario con coste marginal creciente.
+
     Returns:
-        Tupla (solver, y, u, o, M, T, status_info)
-        
-    Raises:
-        ValueError: Si shift_matrix o required_full tienen forma inconsistente
+        (solver, y, u, o, M, T, status)
+        - status es el estado de solver.Solve()
     """
+    if shift_matrix is None or not isinstance(shift_matrix, np.ndarray):
+        raise ValueError("shift_matrix debe ser un np.ndarray (M, T).")
+
     M, T = shift_matrix.shape
-    
-    if T != len(required_full):
+
+    if required_full is None:
+        raise ValueError("required_full no puede ser None.")
+    if len(required_full) != T:
         raise ValueError(f"Inconsistencia: shift_matrix.T={T} != required.len={len(required_full)}")
-    
-    # Crear solver
+
+    # Solver
     solver = pywraplp.Solver.CreateSolver("SCIP")
     if solver is None:
-        raise RuntimeError("No se pudo crear solver SCIP. Verifica instalación de OR-Tools.")
-    
-    # Variables principales
-    y = [solver.IntVar(0, cap_per_shift, f"y_{j}") for j in range(M)]
-    u = [solver.NumVar(0, solver.infinity(), f"u_{t}") for t in range(T)]
-    o = [solver.NumVar(0, solver.infinity(), f"o_{t}") for t in range(T)]
-    
-    # Restricción 1: Balance por intervalo
+        raise RuntimeError("No se pudo crear el solver SCIP. Verifica instalación OR-Tools + SCIP.")
+
+    solver.SetTimeLimit(int(solver_ms))
+    # Nota: algunos builds de SCIP aceptan random_seed así; si no, simplemente ignora la línea
+    try:
+        solver.SetSolverSpecificParametersAsString(f"random_seed={int(random_seed)}")
+    except Exception:
+        pass
+
+    # Variables
+    y = [solver.IntVar(0, int(cap_per_shift), f"y_{j}") for j in range(M)]
+    u = [solver.NumVar(0.0, solver.infinity(), f"u_{t}") for t in range(T)]  # minutos
+    o = [solver.NumVar(0.0, solver.infinity(), f"o_{t}") for t in range(T)]  # minutos
+
+    # Segmentación (coste marginal creciente)
+    seg_width = int(seg_width)
+    if seg_width <= 0:
+        raise ValueError("seg_width debe ser > 0.")
+    K = int(np.ceil(cap_per_shift / seg_width))
+    seg = [[solver.IntVar(0, seg_width, f"seg_{j}_{k}") for k in range(K)] for j in range(M)]
+
+    # y[j] = sum_k seg[j][k]
+    for j in range(M):
+        solver.Add(y[j] == sum(seg[j]))
+
+    # Restricción balance por intervalo (en minutos)
+    required_min = np.asarray(required_full, dtype=float) * 30.0
     for t in range(T):
-        coverage_expr = sum(y[j] * int(shift_matrix[j, t]) for j in range(M))
-        solver.Add(coverage_expr - int(required_full[t]) == o[t] - u[t])
-    
-    # Restricción 2: No exceder agentes disponibles
-    solver.Add(sum(y[j] for j in range(M)) <= n_agents)
-    
-    # Restricción 3 + Objetivo: Coste marginal creciente (segmentación)
-    seg_vars = []
-    seg_costs = []
-    
-    np.random.seed(random_seed)
-    
+        coverage_expr = sum(y[j] * int(shift_matrix[j, t]) for j in range(M))  # minutos
+        solver.Add(coverage_expr - required_min[t] == o[t] - u[t])
+
+    # No exceder agentes disponibles
+    solver.Add(sum(y) <= int(n_agents))
+
+    # Objetivo:
+    # - u/o en minutos -> dividir alpha/beta por 30 para equivalencia a costo por “agente”
+    obj = (alpha_under / 30.0) * sum(u) + (beta_over / 30.0) * sum(o)
+
+    # Coste marginal creciente por turno (por segmento)
     for j in range(M):
-        segs_j = []
-        costs_j = []
-        
-        # Número de segmentos máximo
-        Kseg = (cap_per_shift + seg_width - 1) // seg_width
-        noise = 1.0 + noise_eps * np.random.rand(Kseg)
-        
-        for k in range(Kseg):
-            # Upper bound del segmento
-            ub = seg_width if (k < Kseg - 1) else (cap_per_shift - seg_width * (Kseg - 1))
-            v = solver.NumVar(0, ub, f"seg_{j}_{k}")
-            segs_j.append(v)
-            
-            # Multiplicador de costo creciente
-            mult = (1.0 + k * seg_mult_step) * noise[k]
-            costs_j.append(gamma_head * mult)
-        
-        seg_vars.append(segs_j)
-        seg_costs.append(costs_j)
-        
-        # Reconstrucción de y[j]
-        solver.Add(sum(segs_j) == y[j])
-    
-    # Objetivo
-    obj = alpha_under * sum(u) + beta_over * sum(o)
-    for j in range(M):
-        for k, v in enumerate(seg_vars[j]):
-            obj = obj + seg_costs[j][k] * v
-    
+        for k in range(K):
+            mult = (1.0 + seg_mult_step * k)
+            obj += float(gamma_head) * float(mult) * seg[j][k]
+
+    # Ruido pequeño opcional para romper empates (sobre y[j])
+    if noise_eps and noise_eps > 0:
+        rng = np.random.default_rng(int(random_seed))
+        for j in range(M):
+            obj += float(rng.uniform(0, noise_eps)) * y[j]
+
     solver.Minimize(obj)
-    solver.SetTimeLimit(solver_ms)
-    
+
+    # Resolver aquí (tu main.py espera que build_daily_ilp retorne status)
     status = solver.Solve()
-    
-    logger.info(f"ILP Solver resuelto: status={status} (OPTIMAL=0, FEASIBLE=1, INFEASIBLE=2)")
-    
+    logger.info(
+        f"ILP Solver resuelto: status={status} "
+        f"(OPTIMAL={pywraplp.Solver.OPTIMAL}, FEASIBLE={pywraplp.Solver.FEASIBLE}, "
+        f"INFEASIBLE={pywraplp.Solver.INFEASIBLE})"
+    )
+
     return solver, y, u, o, M, T, status
 
 
@@ -140,72 +123,49 @@ def extract_solution(
     o: List,
     shift_matrix: np.ndarray,
     required_full: np.ndarray
-) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> Tuple[np.ndarray, np.ndarray, Dict]:
     """
-    Extrae valores de la solución del ILP.
-    
-    Args:
-        solver: Solver con solución
-        y: Variables de asignación
-        u: Variables de undercoverage
-        o: Variables de overcoverage
-        shift_matrix: Matriz de cobertura
-        required_full: Requeridos
-        
-    Returns:
-        Tupla (y_val, coverage, metrics_dict)
+    Extrae la solución:
+      - y_val: asignaciones por turno (agentes)
+      - coverage: cobertura por intervalo en "agente-equivalente" (minutos/30)
+      - metrics: under/over en minutos y también en agentes-equivalente
     """
-    y_val = np.array([int(round(v.solution_value())) for v in y])
-    
-    # Recalcular cobertura según solución
-    coverage = np.zeros(len(required_full), dtype=int)
-    for j, count in enumerate(y_val):
-        coverage += count * shift_matrix[j]
-    
-    # Métricas
-    under_val = np.array([u[t].solution_value() for t in range(len(u))])
-    over_val = np.array([o[t].solution_value() for t in range(len(o))])
-    
+    y_val = np.array([int(round(v.solution_value())) for v in y], dtype=int)
+
+    # Cobertura en minutos
+    coverage_min = np.zeros(len(required_full), dtype=float)
+    for j, cnt in enumerate(y_val):
+        coverage_min += float(cnt) * shift_matrix[j]
+
+    # Convertimos a agentes-equivalente
+    coverage = coverage_min / 30.0
+
+    under_val = np.array([float(u[t].solution_value()) for t in range(len(u))], dtype=float)  # minutos
+    over_val  = np.array([float(o[t].solution_value()) for t in range(len(o))], dtype=float)  # minutos
+
     metrics = {
-        "total_assignments": y_val.sum(),
-        "undercoverage_total": under_val.sum(),
-        "overcoverage_total": over_val.sum(),
-        "objective": solver.Objective().Value()
+        "total_assignments": int(y_val.sum()),
+        "undercoverage_total_min": float(under_val.sum()),
+        "overcoverage_total_min": float(over_val.sum()),
+        "undercoverage_total_agents": float(under_val.sum() / 30.0),
+        "overcoverage_total_agents": float(over_val.sum() / 30.0),
+        "objective": float(solver.Objective().Value())
     }
-    
-    logger.info(f"Solución: {metrics['total_assignments']} asignaciones, "
-                f"bajo={metrics['undercoverage_total']:.0f}, "
-                f"sobre={metrics['overcoverage_total']:.0f}")
-    
+
+    logger.info(
+        f"Solución: {metrics['total_assignments']} asignaciones, "
+        f"bajo={metrics['undercoverage_total_agents']:.2f} agentes-eq "
+        f"({metrics['undercoverage_total_min']:.0f} min), "
+        f"sobre={metrics['overcoverage_total_agents']:.2f} agentes-eq "
+        f"({metrics['overcoverage_total_min']:.0f} min)"
+    )
+
     return y_val, coverage, metrics
 
 
 def is_solution_valid(status: int) -> bool:
     """
     Verifica si el solver encontró solución válida.
-    
-    Args:
-        status: Estado retornado por solver.Solve()
-        
-    Returns:
-        True si status es OPTIMAL (0) o FEASIBLE (1)
+    True si status es OPTIMAL o FEASIBLE.
     """
     return status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
-
-
-def log_solver_result(status: int, total_head: int, n_agents: int) -> str:
-    """
-    Genera línea de log del resultado del solver.
-    
-    Args:
-        status: Estado del solver
-        total_head: Número total de asignaciones
-        n_agents: Agentes disponibles
-        
-    Returns:
-        String con información
-    """
-    status_name = {0: "OPTIMAL", 1: "FEASIBLE", 2: "INFEASIBLE"}.get(status, "UNKNOWN")
-    msg = f"ILP result ({status_name}): {total_head} asignaciones (límite {n_agents})"
-    logger.info(msg)
-    return msg

@@ -112,76 +112,143 @@ def build_exact_coverage_vector(
     itv_end_full: np.ndarray
 ) -> np.ndarray:
     """
-    Construye vector exacto de cobertura por turno, considerando pausas y almuerzo.
-    
-    Lógica:
-    1. Base: 1 si [start, end) cubre completamente intervalo [i, f)
-    2. Restar pausas (breaks) de 15 min
-    3. Restar almuerzo (60 min) si existe
-    4. Manejo de turnos que cruzan medianoche (+1440)
-    
-    Args:
-        start_m: Inicio del turno (minutos desde medianoche)
-        end_m: Fin del turno (minutos desde medianoche)
-        descanso1: Boolean (¿hay break 1?)
-        descanso2: Boolean (¿hay break 2?)
-        inicio_refrigerio: String 'HH:MM' o vacío
-        fin_refrigerio: String 'HH:MM' o vacío
-        itv_start_full: Array de inicio de todos los intervalos
-        itv_end_full: Array de fin de todos los intervalos
-        
-    Returns:
-        Vector booleano (0/1) indicando cobertura por intervalo
+    Construye vector exacto de cobertura por turno, considerando pausas y refrigerio.
+
+    ✅ Mantiene exactamente los 48 intervalos de 30 minutos (00:00–23:30).
+    ✅ Retorna minutos efectivos trabajables dentro del intervalo (0..30), NO binario.
+
+    Lógica por intervalo [is, ie):
+        base    = overlap([start_m, end_m), [is, ie))
+        blocked = overlap(union(bloques_no_disponibles), [is, ie))
+        work    = max(0, base - blocked)
+
+    Bloques no disponibles:
+      - Refrigerio: desde Inicio_Refrigerio hasta Fin_Refrigerio (si ambos existen)
+      - Breaks (Descanso1/2): 15 min cada uno (ubicados de forma razonable dentro del turno)
     """
-    from .time_utils import safe_hhmm_to_min
-    
-    # Vector base
-    base = ((start_m <= itv_start_full) & (end_m >= itv_end_full)).astype(int)
-    
-    blocks = []  # (inicio, fin) de pausas a restar
-    
-    # Almuerzo explícito
-    if inicio_refrigerio and fin_refrigerio and inicio_refrigerio.strip() and fin_refrigerio.strip():
-        a0 = safe_hhmm_to_min(inicio_refrigerio)
-        a1 = safe_hhmm_to_min(fin_refrigerio)
-        
-        if a0 is not None and a1 is not None:
-            # Manejo de cruces de medianoche
-            if a1 < a0:
-                a1 += 60
-            if not (start_m <= a0 < end_m):
-                a0 += 1440
-                a1 += 1440
-            blocks.append((a0, a1))
-    else:
-        a0, a1 = None, None
-    
-    # Breaks
+    from .time_utils import parse_time_to_min
+
+    shift_s = int(start_m)
+    shift_e = int(end_m)
+
+    # Base: minutos de solape turno vs intervalo (0..30 por bucket)
+    base = np.maximum(
+        0,
+        np.minimum(shift_e, itv_end_full) - np.maximum(shift_s, itv_start_full)
+    ).astype(int)
+
+    blocks = []  # lista de (inicio, fin) en minutos, dentro del turno
+
+    def _clip_to_shift(bs: int, be: int):
+        bs = max(int(bs), shift_s)
+        be = min(int(be), shift_e)
+        if be <= bs:
+            return None
+        return (bs, be)
+
+    def _overlap_len(a_s: int, a_e: int, b_s: int, b_e: int) -> int:
+        return max(0, min(a_e, b_e) - max(a_s, b_s))
+
+    # -------------------------
+    # 1) Refrigerio (si hay inicio/fin)
+    # -------------------------
+    a0 = parse_time_to_min(inicio_refrigerio, default=None)
+    a1 = parse_time_to_min(fin_refrigerio, default=None)
+
+    a0_adj = a1_adj = None
+    if a0 is not None and a1 is not None:
+        # Si el bloque cruza medianoche, empújalo al día siguiente
+        if a1 < a0:
+            a1 += 1440
+
+        # Alineación al turno: elegimos la versión (día base o +1440) que más solape tenga con el turno
+        cand0 = (a0, a1)
+        cand1 = (a0 + 1440, a1 + 1440)
+        best = max([cand0, cand1], key=lambda ab: _overlap_len(shift_s, shift_e, ab[0], ab[1]))
+        clipped = _clip_to_shift(best[0], best[1])
+        if clipped is not None:
+            blocks.append(clipped)
+            a0_adj, a1_adj = clipped
+
+    # -------------------------
+    # 2) Breaks (15 min cada uno)
+    # -------------------------
+    shift_len = max(0, shift_e - shift_s)
+
+    def _place_break_15(preferred_start: int, *, prefer_end_at: int | None = None, min_start: int | None = None):
+        """
+        Crea un bloque [bs, bs+15) dentro del turno, con clamps.
+        - Si prefer_end_at está definido, intenta terminar exactamente ahí (útil para break antes de refrigerio).
+        - min_start fuerza bs >= min_start (útil para break después de refrigerio).
+        """
+        if shift_len < 15:
+            return None
+
+        if prefer_end_at is not None:
+            be = int(max(shift_s, min(prefer_end_at, shift_e)))
+            bs = be - 15
+            if min_start is not None:
+                bs = max(bs, int(min_start))
+                be = bs + 15
+            if bs < shift_s or be > shift_e:
+                return None
+            return (bs, be)
+
+        bs = int(preferred_start)
+        if min_start is not None:
+            bs = max(bs, int(min_start))
+        bs = max(shift_s, min(bs, shift_e - 15))
+        return (bs, bs + 15)
+
+    # Break 1
     if int(descanso1) > 0:
-        if a0 is not None:
-            b1s = a0 - 15
-            b1e = a0
+        if a0_adj is not None:
+            b1 = _place_break_15(a0_adj - 15, prefer_end_at=a0_adj)
         else:
-            b1s = start_m + max(90, (end_m - start_m) // 3)
-            b1e = b1s + 15
-        blocks.append((b1s, b1e))
-    
+            # ~1/3 del turno, pero al menos 60 min después de iniciar
+            b1 = _place_break_15(shift_s + int(max(60, shift_len * 0.33)))
+        if b1 is not None:
+            blocks.append(b1)
+
+    # Break 2
     if int(descanso2) > 0:
-        if a1 is not None:
-            b2s = a1 + 120
-            b2e = b2s + 15
+        if a1_adj is not None:
+            # después del refrigerio (+120 min, clamped) y nunca antes de a1
+            b2 = _place_break_15(a1_adj + 120, min_start=a1_adj)
         else:
-            b2e = end_m - max(90, (end_m - start_m) // 3)
-            b2s = b2e - 15
-        blocks.append((b2s, b2e))
-    
-    # Aplicar pausas
-    mask = base.copy()
-    for (bs, be) in blocks:
-        cut = ~((itv_end_full <= bs) | (itv_start_full >= be))
-        mask[cut] = 0
-    
-    return mask
+            # ~2/3 del turno, pero deja aire antes de terminar
+            b2 = _place_break_15(shift_s + int(max(shift_len * 0.66, shift_len - 120)))
+        if b2 is not None:
+            blocks.append(b2)
+
+    # -------------------------
+    # 3) Unir (union) bloques para no doble-contar solapes
+    # -------------------------
+    merged = []
+    if blocks:
+        blocks_sorted = sorted(blocks, key=lambda x: x[0])
+        cur_s, cur_e = blocks_sorted[0]
+        for bs, be in blocks_sorted[1:]:
+            if bs <= cur_e:
+                cur_e = max(cur_e, be)
+            else:
+                merged.append((cur_s, cur_e))
+                cur_s, cur_e = bs, be
+        merged.append((cur_s, cur_e))
+
+    # -------------------------
+    # 4) blocked por intervalo y work final
+    # -------------------------
+    blocked = np.zeros_like(base, dtype=int)
+    for bs, be in merged:
+        blocked += np.maximum(
+            0,
+            np.minimum(be, itv_end_full) - np.maximum(bs, itv_start_full)
+        ).astype(int)
+
+    work = base - blocked
+    work = np.clip(work, 0, 30).astype(int)
+    return work
 
 
 def compute_exact_curves(
@@ -318,7 +385,7 @@ def select_ilp_shifts(
 
     # Logging/print
     logger.info(
-        f"ILP result: {int(turnos_ilp["Asignados"].sum())} asignaciones de {len(turnos_ilp)} turnos (con límite {n_agents})."
+       f"ILP result: {int(turnos_ilp['Asignados'].sum())} asignaciones de {len(turnos_ilp)} turnos (con límite {n_agents})."
     )
 
     return turnos_ilp

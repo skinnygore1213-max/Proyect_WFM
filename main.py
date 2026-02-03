@@ -254,9 +254,14 @@ def main():
                 # Construir dataframes
                 df_asig = build_assignment_dataframe(asignaciones, dia)
                 turnos_ilp["Real_Agendas"] = (df_asig["TurnoID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
-                Real_covered = np.zeros(48, dtype=int)
+                
+                # Real_Matrix está en minutos (0..30 por intervalo). Para comparar con 'Requeridos' (en agentes),
+                # convertimos a agente-equivalente dividiendo entre 30.
+                Real_covered_min = np.zeros(48, dtype=float)
                 for j in range(len(turnos_ilp)):
-                    Real_covered += int(turnos_ilp.loc[j, "Real_Agendas"]) * real_matrix[j]
+                    Real_covered_min += int(turnos_ilp.loc[j, "Real_Agendas"]) * real_matrix[j]
+                Real_covered = Real_covered_min / 30.0
+
                 asignacion_semanal.append(df_asig)
                 turnos_ilp["Fecha"] = dia
                 ILP_results_semanal.append(turnos_ilp)
