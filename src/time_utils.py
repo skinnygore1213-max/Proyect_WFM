@@ -187,3 +187,14 @@ def parse_time_to_min(value: Any, default: Optional[int] = None) -> Optional[int
             return hh * 60 + mm
 
     return default
+
+def extraer_horas(turno: object):
+    star,star_minute,end,end_minute = extract_hhmm_components(turno)
+    if star!=None:
+            return {
+                'inicio': f"{star:02}:{star_minute:02}",  # Formato HH:MM
+                'fin': f"{end:02}:{end_minute:02}"           # Formato HH:MM
+                #'Horas_Totales': total_horas
+            }
+    return {'inicio': None, 'fin': None}  # Devuelve None si está vacío o no se encuentra el patrón
+

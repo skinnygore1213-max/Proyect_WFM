@@ -27,6 +27,7 @@ from src.transforms import (
     parse_time_intervals,
     process_turnos_catalog,
     process_agentes_catalog,
+    process_avalagentes_catalog,
     convert_to_minutes,
     filter_by_date,
     filter_available_agents,
@@ -135,6 +136,11 @@ def main():
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
             agentes[dia] = 0
+
+            #Logica de turnos preferidos por agente por día de la semana
+            agentes_Def = process_avalagentes_catalog(agentes,dia_w)
+            
+            
 
             # Vectores de datos
             required_curva = curva_dia["Requeridos"].astype(int).values
