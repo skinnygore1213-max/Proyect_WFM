@@ -10,7 +10,7 @@ import numpy as np
 from datetime import timedelta
 from typing import Tuple
 
-from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min
+from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min
 
 
 def normalize_am_pm(series: pd.Series) -> pd.Series:
@@ -89,8 +89,8 @@ def process_turnos_catalog(turnos: pd.DataFrame) -> pd.DataFrame:
     df["Hora_Termino"] = df["Hora_Termino"].astype(str).str.strip()
     
     # Convertir a minutos
-    df["start_min"] = df["Hora_Inicio"].apply(safe_hhmm_to_min)
-    df["end_min"] = df["Hora_Termino"].apply(safe_hhmm_to_min)
+    df["start_min"] = df["Hora_Inicio"].apply(lambda v: parse_time_to_min(v, default=0) or 0)
+    df["end_min"]   = df["Hora_Termino"].apply(lambda v: parse_time_to_min(v, default=0) or 0)
     
     # Manejo de turno que cruza medianoche
     df.loc[df["end_min"] < df["start_min"], "end_min"] += 1440
