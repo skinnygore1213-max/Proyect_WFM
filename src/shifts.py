@@ -161,10 +161,10 @@ def build_exact_coverage_vector(
         if a1 < a0:
             a1 += 1440
 
-        # Alineación al turno: elegimos la versión (día base o +1440) que más solape tenga con el turno
-        cand0 = (a0, a1)
-        cand1 = (a0 + 1440, a1 + 1440)
-        best = max([cand0, cand1], key=lambda ab: _overlap_len(shift_s, shift_e, ab[0], ab[1]))
+        # Alineación al turno: probamos 0h, +12h, +24h, +36h y elegimos el que más solape con el turno
+        cands = [(a0 + d, a1 + d) for d in (0, 720, 1440, 2160)]
+        best = max(cands, key=lambda ab: _overlap_len(shift_s, shift_e, ab[0], ab[1]))
+
         clipped = _clip_to_shift(best[0], best[1])
         if clipped is not None:
             blocks.append(clipped)
