@@ -10,8 +10,37 @@ import numpy as np
 from datetime import timedelta
 from typing import Tuple
 
-from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min
+from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min, min_to_hhmm
 
+def _overlap_len(a_s: int, a_e: int, b_s: int, b_e: int) -> int:
+    return max(0, min(a_e, b_e) - max(a_s, b_s))
+
+
+def _align_interval_to_shift(block_s: int, block_e: int, shift_s: int, shift_e: int):
+    """
+    Devuelve (s,e) alineado al turno escogiendo el delta que maximiza el solape.
+    Prueba 0h, +12h, +24h, +36h.
+    """
+    if block_e < block_s:
+        block_e += 1440  # cruza medianoche
+
+    deltas = (0, 720, 1440, 2160)
+    best = None
+    best_ol = -1
+
+    for d in deltas:
+        s = block_s + d
+        e = block_e + d
+        ol = _overlap_len(shift_s, shift_e, s, e)
+        if ol > best_ol:
+            best_ol = ol
+            best = (s, e)
+
+    # Si no hay solape, no “inventamos” nada
+    if best_ol <= 0:
+        return None
+
+    return best
 
 def normalize_am_pm(series: pd.Series) -> pd.Series:
     """
@@ -108,6 +137,39 @@ def process_turnos_catalog(turnos: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].astype(str).str.strip()
         else:
             df[col] = ""
+    
+    # -----------------------------
+    # FIX: Refrigerio mal digitado (AM/PM) o fuera del turno
+    # Si Inicio_Refrigerio < Hora_Inicio, buscamos el mejor alineamiento (+12h, +24h, etc.)
+    # -----------------------------
+    def _fix_refrigerio_row(row):
+        ini_raw = row.get("Inicio_Refrigerio", "")
+        fin_raw = row.get("Fin_Refrigerio", "")
+
+        a0 = parse_time_to_min(ini_raw, default=None)
+        a1 = parse_time_to_min(fin_raw, default=None)
+        if a0 is None or a1 is None:
+            return ini_raw, fin_raw
+
+        shift_s = int(row["start_min"])
+        shift_e = int(row["end_min"])
+
+        # regla pedida: solo corregir si Inicio_Refrigerio < Hora_Inicio
+        if a0 >= shift_s:
+            return ini_raw, fin_raw
+
+        aligned = _align_interval_to_shift(a0, a1, shift_s, shift_e)
+        if aligned is None:
+            return ini_raw, fin_raw
+
+        bs, be = aligned
+        # guardamos en formato 24h HH:MM (dentro del día)
+        return min_to_hhmm(bs % 1440), min_to_hhmm(be % 1440)
+
+    if "Inicio_Refrigerio" in df.columns and "Fin_Refrigerio" in df.columns:
+        fixed = df.apply(_fix_refrigerio_row, axis=1, result_type="expand")
+        df["Inicio_Refrigerio"] = fixed[0].fillna("")
+        df["Fin_Refrigerio"] = fixed[1].fillna("")
     
     # Duración en horas (desde H.Efectivas)
     if "H.Efectivas" in df.columns:
