@@ -198,3 +198,65 @@ def extraer_horas(turno: object):
             }
     return {'inicio': None, 'fin': None}  # Devuelve None si está vacío o no se encuentra el patrón
 
+
+def parse_novedad(turno: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[int]]:
+    """
+    Extrae componentes de novedades de un string como 'entre 08:00 AM y 05:00 PM hr: 8'.
+    Retorna una tupla (instruccion, hora_inicio, hora_fin, hrsavail).
+    """
+    if not turno or turno == "":
+        return None, None, None, None
+    
+    # Normalización básica de AM/PM tipo Excel latino
+    turno = re.sub(r"\ba\.\s*m\.\b", "AM", turno, flags=re.IGNORECASE)
+    turno = re.sub(r"\bp\.\s*m\.\b", "PM", turno, flags=re.IGNORECASE)
+    turno = turno.replace("a. m.", "AM").replace("p. m.", "PM").strip()
+
+    regex_ENTRE = re.search(r"(^\s*entre\s+(?<h1>\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(?:y|a)\s+(?<h2>\d{1,2}(?::\d{2})?\s*(?:AM|PM))(?:\s*hr:\s*(?<hrs>\d+(?:\.\d+)?))?\s*$)", str(turno), re.IGNORECASE)
+    regex_DESDE = re.search(r"(^\s*desde\s+(?<h1>\d{1,2}(?::\d{2})?\s*(?:am|pm))(?:\s*hr:\s*(?<hrs>\d+(?:\.\d+)?))?\s*$)", str(turno), re.IGNORECASE)
+    regex_HASTA = re.search(r"(^\s*hasta\s+(?<h2>\d{1,2}(?::\d{2})?\s*(?:am|pm))(?:\s*hr:\s*(?<hrs>\d+(?:\.\d+)?))?\s*$)", str(turno), re.IGNORECASE)
+    if regex_ENTRE:
+        h1 = str(regex_ENTRE.group(1))
+        h2 = str(regex_ENTRE.group(2))
+        hrs = int(regex_ENTRE.group(3)) or None
+        return {
+                    'instruccion': 'entre',
+                    'hora_inicio': h1,
+                    'hora_fin': h2,
+                    'hrsavail': int(hrs) if hrs else None
+                }
+    if regex_DESDE:
+        h1 = str(regex_DESDE.group(1))
+        hrs = int(regex_DESDE.group(2)) or None
+        return {
+                    'instruccion': 'desde',
+                    'hora_inicio': h1,
+                    'hora_fin': None,
+                    'hrsavail': int(hrs) if hrs else None
+                }
+    if regex_HASTA:
+        h2 = str(regex_HASTA.group(1))
+        hrs = int(regex_HASTA.group(2)) or None
+        return {
+                    'instruccion': 'hasta',
+                    'hora_inicio': None,
+                    'hora_fin': h2,
+                    'hrsavail': int(hrs) if hrs else None
+                }
+# 4) NO MATCH: intentar normalizar frases “4 hrs max”
+    if "hr" in turno or "hrs" in turno:
+        # fallback: intenta extraer un número de horas
+        def first_number_in_text(text: str) -> Optional[float]:
+            m = re.search(r"(\d+(?:\.\d+)?)", text)
+            if m:
+                return float(m.group(1))
+            return None
+        hrs = first_number_in_text(turno)
+        return {
+            'instruccion': None,
+            'hora_inicio': None,
+            'hora_fin': None,
+            'hrsavail': int(hrs) if hrs else None
+        }
+
+    return None, None, None, None
