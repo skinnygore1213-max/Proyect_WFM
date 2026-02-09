@@ -272,8 +272,8 @@ def filter_available_agents(
     if criterio==0:
         df = agentes[agentes[disponible_col] != "0"].copy()
     if criterio==1:
-        df = agentes[agentes[disponible_col] != "1"].copy()
-    df = agentes.copy()
+        df = agentes[agentes[disponible_col] == "1"].copy()
+    #df = agentes.copy()
     return df.reset_index(drop=True)
 
 import logging
@@ -325,30 +325,6 @@ def safe_numeric(series: pd.Series, fillna_value: int = 0) -> pd.Series:
         Series numérica (int)
     """
     return pd.to_numeric(series, errors='coerce').fillna(fillna_value).astype(int)
-
-def process_avalagentes_catalog(
-        agentes: pd.DataFrame,
-        disponible_col: str,
-        max_hours_week: int) -> pd.DataFrame:
-    df=agentes[["AgentID", disponible_col]].copy()
-    df=_normalize_columns(df)
-    df=df[df[disponible_col] !="1"].reset_index(drop=True)
-    #validamos si hay turnos preferentes
-    if len(df)==0:
-        #informar que no hay agentes con turnos preferentes
-        logger.info("No hay agentes con turnos preferentes. Se consideran todos los agentes disponibles.")
-        #df=agentes[["AgentID", disponible_col]].copy()
-        return agentes
-    else:
-        df[['hora_inicio','hora_fin']] = df[disponible_col].apply(extraer_horas).apply(pd.Series)
-        df['inicio_min'] = df['hora_inicio'].apply(lambda v: parse_time_to_min(v, default=0) or 0)
-        df['fin_min']   = df['hora_fin'].apply(lambda v: parse_time_to_min(v, default=0) or 0)
-        # Manejo de turno que cruza medianoche
-        df.loc[df['fin_min'] < df['inicio_min'], 'fin_min'] += 1440
-        #combinamos con el catalogo de agentes para devolver tabla completa
-        #df=df.merge(agentes, on="AgentID", how="left")
-        df=agentes.merge(df[['hora_inicio','hora_fin','inicio_min','fin_min']], on="AgentID", how="left")
-        return df
 
 def process_avalagentes_catalog(
         agentes: pd.DataFrame,
