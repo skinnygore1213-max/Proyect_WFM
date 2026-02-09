@@ -10,7 +10,7 @@ import numpy as np
 from datetime import timedelta
 from typing import Tuple
 
-from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min, min_to_hhmm, normalize_am_pm, extract_hhmm_components,extraer_horas
+from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min, min_to_hhmm, normalize_am_pm, extract_hhmm_components,extraer_horas,parse_novedad, curva_per_agent
 
 def _overlap_len(a_s: int, a_e: int, b_s: int, b_e: int) -> int:
     return max(0, min(a_e, b_e) - max(a_s, b_s))
@@ -345,4 +345,34 @@ def process_avalagentes_catalog(
         df=agentes.merge(df[['hora_inicio','hora_fin','inicio_min','fin_min']], on="AgentID", how="left")
         return df
 
-
+def process_avalagentes_catalog(
+        agentes: pd.DataFrame,
+        disponible_col: str) -> pd.DataFrame:
+    agentes=agentes[["AgentID", disponible_col]].copy()
+    agentes=_normalize_columns(agentes)
+    df=agentes[agentes[disponible_col] !="1"].reset_index(drop=True)
+    #print(df)
+    #validamos si hay turnos preferentes
+    if len(df)==0:
+        #informar que no hay agentes con turnos preferentes
+        print("No hay agentes con turnos preferentes. Se consideran todos los agentes disponibles.")
+        #df=agentes[["AgentID", disponible_col]].copy()
+        return agentes
+    else:
+        df[['instruccion','hora_inicio','hora_fin','hrsavail']] = df[disponible_col].apply(parse_novedad, Max_hours=9).apply(pd.Series)
+        df["hora_inicio"] = pd.to_datetime(df["hora_inicio"], format="%I:%M %p", errors='coerce')#.dt.time
+        df["hora_fin"] = pd.to_datetime(df["hora_fin"], format="%I:%M %p", errors='coerce')#.dt.time
+        df['hora_fin'] = df.apply(lambda row: row['hora_fin'] + timedelta(days=1) if row['hora_fin'] < row['hora_inicio'] else row['hora_fin'], axis=1)
+        df['hora_fin'] = df.apply(lambda row: row['hora_inicio'] + timedelta(hours=row['hrsavail']) if row['instruccion'] == 'desde' else row['hora_fin'], axis=1)
+        df['hora_inicio'] = df.apply(lambda row: row['hora_fin'] - timedelta(hours=row['hrsavail']) if row['instruccion'] == 'hasta' else row['hora_inicio'], axis=1)
+        df['Curva'] = df.apply(lambda row: curva_per_agent(row['hora_inicio'], row['hora_fin']), axis=1)
+        #convertimos horas a minutos
+        df['inicio_min'] = df['hora_inicio'].apply(lambda v: parse_time_to_min(v, default=0) or 0)
+        df['fin_min']   = df['hora_fin'].apply(lambda v: parse_time_to_min(v, default=0) or 0)
+        # Manejo de turno que cruza medianoche
+        df.loc[df['fin_min'] < df['inicio_min'], 'fin_min'] += 1440
+        #combinamos con el catalogo de agentes para devolver tabla completa
+        #df=df.merge(agentes, on="AgentID", how="left")
+        #df=agentes.merge(df[['AgentID','instruccion','hora_inicio','hora_fin','inicio_min','fin_min','hrsavail']], on="AgentID", how="left")
+        df=agentes.merge(df[['AgentID','instruccion','hora_inicio','hora_fin','inicio_min','fin_min','hrsavail','Curva']], on="AgentID", how="left")
+        return df
