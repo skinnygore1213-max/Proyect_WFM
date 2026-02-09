@@ -130,17 +130,16 @@ def main():
             
             # Filtrar curva del día
             curva_dia = curva[curva['Fecha'] == dia].copy()
+
+            #Logica de turnos preferidos por agente por día de la semana
+            agentes_Def = filter_available_agents(agentes,dia_w,0)
+            agentes_Def = process_avalagentes_catalog(agentes_Def,dia_w)
             
             # Agentes disponibles
-            agentes_disponibles = filter_available_agents(agentes,dia_w)
+            agentes_disponibles = filter_available_agents(agentes,dia_w,1)
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
             agentes[dia] = 0
-
-            #Logica de turnos preferidos por agente por día de la semana
-            agentes_Def = process_avalagentes_catalog(agentes,dia_w)
-            
-            
 
             # Vectores de datos
             required_curva = curva_dia["Requeridos"].astype(int).values
@@ -164,7 +163,6 @@ def main():
             
             # -------- 3b. Preselección heurística --------
             #logger.info(f"Preselección heurística K={config.K_PRESELECT}...")
-            
             turnos_k = preselect_shifts(
                 turnos,
                 window_start,
@@ -175,7 +173,6 @@ def main():
                 config.CAP_PER_INTENSITY,
                 config.K_PRESELECT
             )
-
             turnos_k = select_final_shifts(
                 turnos_k,
                 "quick_score",

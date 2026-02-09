@@ -10,7 +10,7 @@ import numpy as np
 from datetime import timedelta
 from typing import Tuple
 
-from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min, min_to_hhmm, normalize_am_pm, extract_hhmm_components,extraer_horas,parse_novedad, curva_per_agent
+from .time_utils import hhmm_to_min, hhmm_to_hour, safe_hhmm_to_min, parse_time_to_min, min_to_hhmm, extract_hhmm_components,extraer_horas,parse_novedad, curva_per_agent
 
 def _overlap_len(a_s: int, a_e: int, b_s: int, b_e: int) -> int:
     return max(0, min(a_e, b_e) - max(a_s, b_s))
@@ -254,6 +254,7 @@ def filter_by_date(curva: pd.DataFrame) -> list:
 def filter_available_agents(
     agentes: pd.DataFrame, 
     disponible_col: str,
+    criterio: int,
     hours_available_col: str = 'Horas_Disponibles'
 ) -> pd.DataFrame:
     """
@@ -267,8 +268,12 @@ def filter_available_agents(
     Returns:
         DataFrame filtrado solo con agentes disponibles y con horas > 0
     """
-    df = agentes[agentes[disponible_col] !="0"].copy()
-    df = df[df[hours_available_col] > 0].copy()
+
+    if criterio==0:
+        df = agentes[agentes[disponible_col] != "0"].copy()
+    if criterio==1:
+        df = agentes[agentes[disponible_col] != "1"].copy()
+    df = agentes.copy()
     return df.reset_index(drop=True)
 
 import logging
