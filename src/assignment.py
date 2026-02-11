@@ -73,8 +73,8 @@ def assign_shifts_to_agents(
                     asignaciones.append({
                         "Agente": agent_id,
                         "TurnoID": turno_id,
-                        "Inicio": h_ini,
-                        "Fin": h_fin
+                        "Hora_Inicio": h_ini,
+                        "Hora_Termino": h_fin
                     })
                     
                     # Actualizar agentes
@@ -153,7 +153,7 @@ def build_assignment_dataframe(asignaciones: List[Dict], fecha: str) -> pd.DataF
         DataFrame con asignaciones del día
     """
     if not asignaciones:
-        return pd.DataFrame(columns=["Agente", "TurnoID", "Inicio", "Fin", "Fecha"])
+        return pd.DataFrame(columns=["Agente", "TurnoID", "Hora_Inicio", "Hora_Termino", "Fecha"])
     
     df = pd.DataFrame(asignaciones)
     df["Fecha"] = fecha

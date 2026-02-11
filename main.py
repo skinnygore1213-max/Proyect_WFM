@@ -160,6 +160,9 @@ def main():
             logger.info(f"Agentes con turnos preferentes para {dia_w}: {preferentes_count}")
 
             if preferentes_count > 0:
+                agentes_Def = agentes_Def.rename(columns={dia_w: 'disponible'})
+                agentes_Def["Turno_ID"] = "Sin preferencia"
+                agentes_Def['Fecha']=dia
                 #agentes = agentes.merge(agentes_Def[["AgentID", "instruccion"]], on="AgentID", how="left")
                 for index,row in agentes_Def.iterrows():
                     agent_id = row["AgentID"]
@@ -196,11 +199,25 @@ def main():
                         config.CAP_PER_INTENSITY,
                         1
                     )
+                    turnos_k_agent = select_final_shifts(
+                        turnos_k_agent,
+                        "quick_score",
+                        config.M_FINAL,
+                        config.CAP_PER_INTENSITY
+                    )
+                    turnos_k_agent = select_shifts_by_intensity(
+                        turnos_k_agent,
+                        score_column="score_final",
+                        n_preselect=1,
+                        cap_per_intensity=config.CAP_PER_INTENSITY
+                    )
+                    #print(turnos_k_agent)
                     if len(turnos_k_agent) > 0:
-                        #turno_id = turnos_k_agent.iloc[0]["Turno_ID"]
+                        turno_id = turnos_k_agent.iloc[0]["Turno_ID"]
                         #asignamos el turno preferente al agente en la tabla de agentes_def
-                        #agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = turno_id
-                        row["Turno_ID"] = turnos_k_agent.iloc[0]["Turno_ID"]
+                        agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = turno_id
+                        #print(turno_id)
+                        #row["Turno_ID"] = turnos_k_agent.iloc[0]["Turno_ID"]
                     else:
                         logger.warning(f"No hay turnos preferentes disponibles para el agente {agent_id} en {dia_w}. Se considera sin preferencia.")
                         #agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = None
@@ -355,6 +372,7 @@ def main():
         ILP_results_semanal = pd.concat(ILP_results_semanal, ignore_index=True)
         Turnos_K_Week = pd.concat(Turnos_K_Week, ignore_index=True)
         Novedades_semanal = pd.concat(Novedades_semanal, ignore_index=True)
+        Novedades_semanal = pd.merge(Novedades_semanal, turnos[["Turno_ID", "Hora_Inicio", "Hora_Termino"]], on="Turno_ID", how="left")
         
         # Formatear cobertura
         cobertura_semanal = format_coverage_for_export(cobertura_semanal)
@@ -366,7 +384,7 @@ def main():
             agentes,
             ILP_results_semanal,
             Turnos_K_Week,
-            Novedades_semanal,
+            Novedades_semanal[["AgentID", "Turno_ID", "Hora_Inicio", "Hora_Termino", "Fecha", "disponible"]],
             config.OUTPUT_ASSIGNMENT,
             config.OUTPUT_COVERAGE,
             config.OUTPUT_AGENTS,
