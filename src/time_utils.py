@@ -204,7 +204,7 @@ def parse_novedad(turno: str,
     Extrae componentes de novedades de un string como 'entre 08:00 AM y 05:00 PM hr: 8'.
     Retorna una tupla (instruccion, hora_inicio, hora_fin, hrsavail).
     """
-    if not turno or turno == "":
+    if not turno or turno == "" or turno == "nan" or turno == "1" or turno == "0" or turno == 1 or turno == 0 or turno == None:
         return None, None, None, None
     
     # Normalización básica de AM/PM tipo Excel latino

@@ -134,12 +134,17 @@ def main():
             #Logica de turnos preferidos por agente por día de la semana
             agentes_Def = filter_available_agents(agentes,dia_w,0)
             agentes_Def = process_avalagentes_catalog(agentes_Def,dia_w)
+
+
             
             # Agentes disponibles
             agentes_disponibles = filter_available_agents(agentes,dia_w,1)
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
             agentes[dia] = 0
+            if n_agents == 0:
+                logger.warning(f"No hay agentes disponibles para {dia}. Saltando.")
+                continue
 
             # Vectores de datos
             required_curva = curva_dia["Requeridos"].astype(int).values
