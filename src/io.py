@@ -126,11 +126,13 @@ def export_assignment_results(
     agentes_final: pd.DataFrame,
     ILP_results_semanal: pd.DataFrame,
     turnos_k_semanal: pd.DataFrame,
+    novedades_semanal: pd.DataFrame,
     output_assignment: str,
     output_coverage: str,
     output_agents: str,
     output_ilp_results: str,
-    output_turnos_k: str
+    output_turnos_k: str,
+    output_novedades: str
 ) -> None:
     """
     Exporta los 3 archivos de resultado.
@@ -143,11 +145,13 @@ def export_assignment_results(
         output_coverage: Ruta de CoberturaFinal.xlsx
         output_agents: Ruta de Agents.xlsx
     """
+
     export_dataframe(asignacion_semanal, output_assignment, index=False)
     export_dataframe(cobertura_semanal, output_coverage, index=False)
     export_dataframe(agentes_final, output_agents, index=False)
     export_dataframe(ILP_results_semanal, output_ilp_results, index=False)
     export_dataframe(turnos_k_semanal, output_turnos_k, index=False)
+    export_dataframe(novedades_semanal, output_novedades, index=False)
     
     logger.info("Resultados finales exportados")
 

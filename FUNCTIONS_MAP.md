@@ -30,7 +30,7 @@
 | Safe numeric conversion | `safe_numeric()` | transforms.py | 6 | ✓ |
 | **Detect window** | `detect_time_window()` | coverage.py | 20 | ✓ Automática 24h o reducida |
 | **Filter to window** | `filter_to_window()` | coverage.py | 12 | ✓ |
-| Format time range | `format_time_range()` | coverage.py | 8 | ✓ Output: "08:00 a 22:30" |
+| Format time range | `format_time_range()` | time_utils.py | 8 | ✓ Output: "08:00 a 22:30" |
 | Log window info | `log_window_info()` | coverage.py | 10 | ✓ |
 | Validate coverage | `validate_coverage_vector()` | coverage.py | 25 | ✓ Calcula under/over/mae/rmse |
 | **Quick score shifts** | `quick_score_shifts()` | shifts.py | 15 | ✓ Heurística rápida (sin pausas) |

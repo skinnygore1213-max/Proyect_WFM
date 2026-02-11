@@ -67,6 +67,7 @@ def assign_shifts_to_agents(
                     agentes.loc[agentes["AgentID"] == agent_id, "Horas_Disponibles"].values[0]
                 )
                 
+                #fundamental por que no hay otro filtro dentro del ciclo que verifique las horas, si el agente no tiene horas disponibles, se pasa al siguiente
                 if horas_disp >= duracion:
                     # Asignar
                     asignaciones.append({

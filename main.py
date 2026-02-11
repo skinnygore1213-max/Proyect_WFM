@@ -117,7 +117,7 @@ def main():
         cobertura_semanal = []
         ILP_results_semanal = []
         Turnos_K_Week = []
-        
+        Novedades_semanal = []
         
         for dia in dias_disponibles:
             dia_w = dt.datetime.strptime(dia, "%d/%m/%Y").date().strftime('%A')
@@ -143,12 +143,13 @@ def main():
             if window_start is None:
                 logger.warning(f"Sin demanda positiva en {dia}. Saltando.")
                 continue
-            
+
+            #Mesnaje en formato HH:MM "Ventana horaria: 00:00 a 24:00 (48 intervalos)"
             msg_window=log_window_info(window_start, window_end, len(required_full))
             logger.info(msg_window)
 
             # Filtrar a ventana
-            i_min, f_min, required, T = filter_to_window(
+            vector_i_min, vector_f_min, vector_required, T = filter_to_window(
                 i_min_full, f_min_full, required_full, window_start, window_end
             )
 
@@ -159,18 +160,54 @@ def main():
             logger.info(f"Agentes con turnos preferentes para {dia_w}: {preferentes_count}")
 
             if preferentes_count > 0:
-                
                 #agentes = agentes.merge(agentes_Def[["AgentID", "instruccion"]], on="AgentID", how="left")
-                '''
-                for row in agentes_Def.iterrows():
+                for index,row in agentes_Def.iterrows():
                     agent_id = row["AgentID"]
-                    instruccion = row["instruccion"]
-                    agentes.loc[agentes["AgentID"] == agent_id, dia] = instruccion
-                    '''
+                    #agent_id = row["AgentID"].iloc[index]
+                    curva_agent=row["Curva"]
+                    window_start_agent = row["inicio_min"], 
+                    window_end_agent = row["fin_min"],
+                    #instruccion = row["instruccion"]
+                    #agentes.loc[agentes["AgentID"] == agent_id, dia] = instruccion
+                    #convertimos curva por agente a dataframe para sacar vectores de i_min, f_min y required
+                    curva_agent_df = pd.DataFrame({
+                        "Intervalo": curva_agent,
+                        "agent_count": 1
+                        #"i_min_agent": curva_agent.apply(lambda x: int(x.split("-")[0])),
+                        #"f_min_agent": curva_agent.apply(lambda x: int(x.split("-")[1])),
+                        #"required_agent": curva_agent.apply(lambda x: int(x.split("-")[2]))
+                    })
+                    curva_dia_agent = curva_dia.merge(curva_agent_df, on="Intervalo", how="left")
+                    # Vectores de datos
+                    required_agent = curva_dia_agent["agent_count"].values
+                    i_min_agent = curva_dia_agent["i_min"].values
+                    f_min_agent = curva_dia_agent["f_min"].values
 
-
-
+                    vector_i_min_agent, vector_f_min_agent, vector_required_agent, T = filter_to_window(
+                        i_min_agent, f_min_agent, required_agent, window_start_agent, window_end_agent
+                    )
+                    turnos_k_agent = preselect_shifts(
+                        turnos,
+                        window_start_agent,
+                        window_end_agent,
+                        vector_i_min_agent, 
+                        vector_f_min_agent, 
+                        vector_required_agent,
+                        config.CAP_PER_INTENSITY,
+                        1
+                    )
+                    if len(turnos_k_agent) > 0:
+                        #turno_id = turnos_k_agent.iloc[0]["Turno_ID"]
+                        #asignamos el turno preferente al agente en la tabla de agentes_def
+                        #agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = turno_id
+                        row["Turno_ID"] = turnos_k_agent.iloc[0]["Turno_ID"]
+                    else:
+                        logger.warning(f"No hay turnos preferentes disponibles para el agente {agent_id} en {dia_w}. Se considera sin preferencia.")
+                        #agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = None
+                        row["Turno_ID"] = None
             
+            Novedades_semanal.append(agentes_Def)
+
             # Agentes disponibles
             agentes_disponibles = filter_available_agents(agentes,dia_w,1)
             n_agents = len(agentes_disponibles)
@@ -186,9 +223,9 @@ def main():
                 turnos,
                 window_start,
                 window_end,
-                i_min,
-                f_min,
-                required,
+                vector_i_min, 
+                vector_f_min, 
+                vector_required,
                 config.CAP_PER_INTENSITY,
                 config.K_PRESELECT
             )
@@ -206,7 +243,7 @@ def main():
             )
             
             # -------- 3c. Curvas exactas --------
-            #logger.info(f"Cálculo de curvas exactas para M={config.M_FINAL}...")
+            #logger.info(f"Cálculo de curvas exactas para K={config.K_PRESELECT}...")
             
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
             turnos_k["Fecha"] = dia
@@ -317,6 +354,7 @@ def main():
         cobertura_semanal = pd.concat(cobertura_semanal, ignore_index=True)
         ILP_results_semanal = pd.concat(ILP_results_semanal, ignore_index=True)
         Turnos_K_Week = pd.concat(Turnos_K_Week, ignore_index=True)
+        Novedades_semanal = pd.concat(Novedades_semanal, ignore_index=True)
         
         # Formatear cobertura
         cobertura_semanal = format_coverage_for_export(cobertura_semanal)
@@ -328,11 +366,13 @@ def main():
             agentes,
             ILP_results_semanal,
             Turnos_K_Week,
+            Novedades_semanal,
             config.OUTPUT_ASSIGNMENT,
             config.OUTPUT_COVERAGE,
             config.OUTPUT_AGENTS,
             config.OUTPUT_ILP_RESULTS,
-            config.OUTPUT_TURNOS_K
+            config.OUTPUT_TURNOS_K,
+            config.OUTPUT_NOVEDADES
         )
         
         # ============================================================
