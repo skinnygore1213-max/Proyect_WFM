@@ -270,9 +270,9 @@ def filter_available_agents(
     """
 
     if criterio==0:
-        df = agentes[agentes[disponible_col] != "0"].copy()
+        df = agentes[~((agentes[disponible_col] == "0") | (agentes[disponible_col] == 0))].copy()
     if criterio==1:
-        df = agentes[agentes[disponible_col] == "1"].copy()
+        df = agentes[(agentes[disponible_col] == "1") | (agentes[disponible_col] == 1)].copy()
     #df = agentes.copy()
     return df.reset_index(drop=True)
 
