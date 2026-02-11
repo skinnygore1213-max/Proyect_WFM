@@ -131,21 +131,6 @@ def main():
             # Filtrar curva del día
             curva_dia = curva[curva['Fecha'] == dia].copy()
 
-            #Logica de turnos preferidos por agente por día de la semana
-            agentes_Def = filter_available_agents(agentes,dia_w,0)
-            agentes_Def = process_avalagentes_catalog(agentes_Def,dia_w)
-
-
-            
-            # Agentes disponibles
-            agentes_disponibles = filter_available_agents(agentes,dia_w,1)
-            n_agents = len(agentes_disponibles)
-            logger.info(f"Agentes disponibles: {n_agents}")
-            agentes[dia] = 0
-            if n_agents == 0:
-                logger.warning(f"No hay agentes disponibles para {dia}. Saltando.")
-                continue
-
             # Vectores de datos
             required_curva = curva_dia["Requeridos"].astype(int).values
             required_full = curva_dia["Req_True"].values
@@ -159,12 +144,41 @@ def main():
                 logger.warning(f"Sin demanda positiva en {dia}. Saltando.")
                 continue
             
-            log_window_info(window_start, window_end, len(required_full))
-            
+            msg_window=log_window_info(window_start, window_end, len(required_full))
+            logger.info(msg_window)
+
             # Filtrar a ventana
             i_min, f_min, required, T = filter_to_window(
                 i_min_full, f_min_full, required_full, window_start, window_end
             )
+
+            #Logica de turnos preferidos por agente por día de la semana
+            agentes_Def = filter_available_agents(agentes,dia_w,0)
+            agentes_Def = process_avalagentes_catalog(agentes_Def,dia_w)
+            preferentes_count = len(agentes_Def) if agentes_Def is not None else 0
+            logger.info(f"Agentes con turnos preferentes para {dia_w}: {preferentes_count}")
+
+            if preferentes_count > 0:
+                
+                #agentes = agentes.merge(agentes_Def[["AgentID", "instruccion"]], on="AgentID", how="left")
+                '''
+                for row in agentes_Def.iterrows():
+                    agent_id = row["AgentID"]
+                    instruccion = row["instruccion"]
+                    agentes.loc[agentes["AgentID"] == agent_id, dia] = instruccion
+                    '''
+
+
+
+            
+            # Agentes disponibles
+            agentes_disponibles = filter_available_agents(agentes,dia_w,1)
+            n_agents = len(agentes_disponibles)
+            logger.info(f"Agentes disponibles: {n_agents}")
+            agentes[dia] = 0
+            if n_agents == 0:
+                logger.warning(f"No hay agentes disponibles para {dia}. Saltando.")
+                continue
             
             # -------- 3b. Preselección heurística --------
             #logger.info(f"Preselección heurística K={config.K_PRESELECT}...")

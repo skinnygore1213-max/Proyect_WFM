@@ -8,6 +8,7 @@ y gestionar la cobertura por intervalo.
 import numpy as np
 import pandas as pd
 from typing import Tuple, Optional
+from .time_utils import format_time_range
 import logging
 
 logger = logging.getLogger(__name__)
@@ -82,22 +83,6 @@ def filter_to_window(
     return i_min_w, f_min_w, required_w, T
 
 
-def format_time_range(start_min: int, end_min: int) -> str:
-    """
-    Formatea un rango de tiempo [start_min, end_min) como 'HH:MM a HH:MM'.
-    
-    Args:
-        start_min: Inicio en minutos
-        end_min: Fin en minutos
-        
-    Returns:
-        String formateado 'HH:MM a HH:MM'
-    """
-    h_s, m_s = start_min // 60, start_min % 60
-    h_e, m_e = end_min // 60, end_min % 60
-    return f"{h_s:02d}:{m_s:02d} a {h_e:02d}:{m_e:02d}"
-
-
 def log_window_info(
     window_start: int,
     window_end: int,
@@ -116,7 +101,7 @@ def log_window_info(
     """
     window_str = format_time_range(window_start, window_end)
     msg = f"Ventana horaria: {window_str} ({num_intervals} intervalos)"
-    logger.info(msg)
+    #logger.info(msg)
     return msg
 
 

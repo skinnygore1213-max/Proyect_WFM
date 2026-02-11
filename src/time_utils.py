@@ -293,3 +293,18 @@ def curva_per_agent(inicio: str, fin: str) -> list:
             curva.append(intervalcount)
             intervalcount += timedelta(minutes=30)
         return curva
+    
+def format_time_range(start_min: int, end_min: int) -> str:
+    """
+    Formatea un rango de tiempo en minutos [start_min, end_min) como 'HH:MM a HH:MM'.
+
+    Args:
+        start_min: Inicio en minutos
+        end_min: Fin en minutos
+        
+    Returns:
+        String formateado 'HH:MM a HH:MM'
+    """
+    h_s, m_s = start_min // 60, start_min % 60
+    h_e, m_e = end_min // 60, end_min % 60
+    return f"{h_s:02d}:{m_s:02d} a {h_e:02d}:{m_e:02d}"

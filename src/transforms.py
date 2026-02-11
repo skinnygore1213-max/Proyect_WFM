@@ -331,14 +331,14 @@ def process_avalagentes_catalog(
         disponible_col: str) -> pd.DataFrame:
     agentes=agentes[["AgentID", disponible_col]].copy()
     agentes=_normalize_columns(agentes)
-    df=agentes[agentes[disponible_col] !="1"].reset_index(drop=True)
+    df=agentes[~((agentes[disponible_col] == "1") | (agentes[disponible_col] == 1))].reset_index(drop=True)
     #print(df)
     #validamos si hay turnos preferentes
     if len(df)==0:
         #informar que no hay agentes con turnos preferentes
-        print("No hay agentes con turnos preferentes. Se consideran todos los agentes disponibles.")
+        #print("No hay agentes con turnos preferentes. Se consideran todos los agentes disponibles.")
         #df=agentes[["AgentID", disponible_col]].copy()
-        return agentes
+        return None
     else:
         df[['instruccion','hora_inicio','hora_fin','hrsavail']] = df[disponible_col].apply(parse_novedad, Max_hours=9).apply(pd.Series)
         df["hora_inicio"] = pd.to_datetime(df["hora_inicio"], format="%I:%M %p", errors='coerce')#.dt.time
@@ -355,5 +355,5 @@ def process_avalagentes_catalog(
         #combinamos con el catalogo de agentes para devolver tabla completa
         #df=df.merge(agentes, on="AgentID", how="left")
         #df=agentes.merge(df[['AgentID','instruccion','hora_inicio','hora_fin','inicio_min','fin_min','hrsavail']], on="AgentID", how="left")
-        df=agentes.merge(df[['AgentID','instruccion','hora_inicio','hora_fin','inicio_min','fin_min','hrsavail','Curva']], on="AgentID", how="left")
+        #df=agentes.merge(df[['AgentID','instruccion','hora_inicio','hora_fin','inicio_min','fin_min','hrsavail','Curva']], on="AgentID", how="left")
         return df
