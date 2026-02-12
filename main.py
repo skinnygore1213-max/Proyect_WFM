@@ -331,7 +331,7 @@ def main():
                 if preferentes_count > 0:
                     df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
                 #conteo de agendas reales asignadas por turno, incluyendo los turnos preferentes de los agentes con novedades
-                turnos_ilp["Real_Agendas"] = (df_asig["TurnoID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
+                turnos_ilp["Real_Agendas"] = (df_asig["Turno_ID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
                 
                 # Real_Matrix está en minutos (0..30 por intervalo). Para comparar con 'Requeridos' (en agentes),
                 # convertimos a agente-equivalente dividiendo entre 30.

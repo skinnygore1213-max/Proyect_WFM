@@ -71,8 +71,8 @@ def assign_shifts_to_agents(
                 if horas_disp >= duracion:
                     # Asignar
                     asignaciones.append({
-                        "Agente": agent_id,
-                        "TurnoID": turno_id,
+                        "AgentID": agent_id,
+                        "Turno_ID": turno_id,
                         "Hora_Inicio": h_ini,
                         "Hora_Termino": h_fin
                     })
