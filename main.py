@@ -127,6 +127,10 @@ def main():
             logger.info(f"Procesando: {dia}")
             logger.info(f"Procesando: {dia_w}")
             logger.info(f"{'*'*70}")
+
+            # Crear columna de tracking del día si no existe
+            if dia not in agentes.columns:
+                agentes[dia] = 0
             
             # Filtrar curva del día
             curva_dia = curva[curva['Fecha'] == dia].copy()
@@ -163,7 +167,6 @@ def main():
                 agentes_Def = agentes_Def.rename(columns={dia_w: 'disponible'})
                 agentes_Def["Turno_ID"] = "Sin preferencia"
                 agentes_Def['Fecha']=dia
-                #agentes = agentes.merge(agentes_Def[["AgentID", "instruccion"]], on="AgentID", how="left")
                 for index,row in agentes_Def.iterrows():
                     agent_id = row["AgentID"]
                     curva_agent=row["Curva"]
@@ -173,9 +176,6 @@ def main():
                     curva_agent_df = pd.DataFrame({
                         "Intervalo": curva_agent,
                         "agent_count": 1
-                        #"i_min_agent": curva_agent.apply(lambda x: int(x.split("-")[0])),
-                        #"f_min_agent": curva_agent.apply(lambda x: int(x.split("-")[1])),
-                        #"required_agent": curva_agent.apply(lambda x: int(x.split("-")[2]))
                     })
                     curva_dia_agent = curva_dia.merge(curva_agent_df, on="Intervalo", how="left")
                     # Vectores de datos
@@ -203,16 +203,27 @@ def main():
                     turnos_k_agent = select_shifts_by_intensity(
                         turnos_k_agent,
                         score_column="score_final",
-                        n_preselect=1,
+                        n_preselect=config.M_FINAL,
                         cap_per_intensity=config.CAP_PER_INTENSITY
                     )
                     #print(turnos_k_agent)
-                    if len(turnos_k_agent) > 0:
-                        turno_id = turnos_k_agent.iloc[0]["Turno_ID"]
-                        #asignamos el turno preferente al agente en la tabla de agentes_def
-                        agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = turno_id
-                        #print(turno_id)
-                    else:
+                    for index, row in turnos_k_agent.iterrows():
+                        turno_id = row["Turno_ID"]
+                        duracion = int(row["Duracion_Horas"])
+                        horas_disp = float(agentes.loc[agentes["AgentID"] == agent_id, "Horas_Disponibles"].values[0])
+                        #fundamental por que no hay otro filtro dentro del ciclo que verifique las horas, si el agente no tiene horas disponibles, se pasa al siguiente
+                        if horas_disp >= duracion:
+                            #asignamos el turno preferente al agente en la tabla de agentes_def
+                            agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = turno_id
+                            # Actualizar agentes
+                            agentes.loc[agentes["AgentID"] == agent_id, "Horas_Asignadas"] += duracion
+                            agentes.loc[agentes["AgentID"] == agent_id, "Horas_Disponibles"] -= duracion# actualizamos horas del día
+                            agentes.loc[agentes["AgentID"] == agent_id, [dia]] += duracion
+                            #print(turno_id)
+                            turnos_asignados = True  # Se ha asignado al menos un turno en este ciclo
+                            break
+                    if not turnos_asignados:
+                    #else:
                         logger.warning(f"No hay turnos preferentes disponibles para el agente {agent_id} en {dia_w}. Se considera sin preferencia.")
                         agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = "Sin preferencia"
                 #Construcción del dataframe de novedades diarias por agente
@@ -224,7 +235,6 @@ def main():
             agentes_disponibles = filter_available_agents(agentes,dia_w,1)
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
-            agentes[dia] = 0
             if n_agents == 0:
                 logger.warning(f"No hay agentes disponibles para {dia}. Saltando.")
                 continue
@@ -344,16 +354,12 @@ def main():
 
                 df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, covered, Real_covered, dia)
                 cobertura_semanal.append(df_cov)
-                Turnos_K_Week.append(turnos_k)
+                Turnos_K_Week.append(turnos_m)
 
                 logger.info(f"Día {dia} completado: {len(asignaciones)} asignaciones")
                 
             else:
                 logger.error(f"ILP no encontró solución para {dia}")
-            
-            # Crear columna de tracking del día si no existe
-            if dia not in agentes.columns:
-                agentes[dia] = 0
             
             # Actualizar agentes disponibles
             #agentes_disponibles = filter_available_agents(agentes)
