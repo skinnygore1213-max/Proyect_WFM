@@ -263,9 +263,15 @@ def main():
                 cap_per_intensity=config.CAP_PER_INTENSITY
             )
             logger.info(f"Preseleccionados {len(turnos_k)} turnos por intensidad de {len(turnos_solap)} turnos solapantes.")
+
+            #Incluimos en turnos_K los turnos preferenciales que no estan en este listado
+            turnosID = turnos_k["Turno_ID"].unique().tolist()
+            turnos_IDPref = agentes_Pref.loc[~agentes_Pref["Turno_ID"].isin(turnosID), "Turno_ID"].unique().tolist()
+            turnos_k_pref = turnos.loc[turnos["Turno_ID"].isin(turnos_IDPref)]
+            turnos_k = pd.concat([turnos_k, turnos_k_pref], ignore_index=True)
+
             # -------- 3c. Curvas exactas --------
             #logger.info(f"Cálculo de curvas exactas para K={config.K_PRESELECT}...")
-            
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
             turnos_k["Fecha"] = dia
             
