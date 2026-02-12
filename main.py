@@ -166,12 +166,9 @@ def main():
                 #agentes = agentes.merge(agentes_Def[["AgentID", "instruccion"]], on="AgentID", how="left")
                 for index,row in agentes_Def.iterrows():
                     agent_id = row["AgentID"]
-                    #agent_id = row["AgentID"].iloc[index]
                     curva_agent=row["Curva"]
                     window_start_agent = row["inicio_min"], 
                     window_end_agent = row["fin_min"],
-                    #instruccion = row["instruccion"]
-                    #agentes.loc[agentes["AgentID"] == agent_id, dia] = instruccion
                     #convertimos curva por agente a dataframe para sacar vectores de i_min, f_min y required
                     curva_agent_df = pd.DataFrame({
                         "Intervalo": curva_agent,
@@ -217,13 +214,13 @@ def main():
                         #asignamos el turno preferente al agente en la tabla de agentes_def
                         agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = turno_id
                         #print(turno_id)
-                        #row["Turno_ID"] = turnos_k_agent.iloc[0]["Turno_ID"]
                     else:
                         logger.warning(f"No hay turnos preferentes disponibles para el agente {agent_id} en {dia_w}. Se considera sin preferencia.")
-                        #agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = None
-                        row["Turno_ID"] = None
-            
-            Novedades_semanal.append(agentes_Def)
+                        agentes_Def.loc[agentes_Def["AgentID"] == agent_id, "Turno_ID"] = "Sin preferencia"
+                #Construcción del dataframe de novedades diarias por agente
+                agentes_Def = pd.merge(agentes_Def, turnos[["Turno_ID", "Hora_Inicio", "Hora_Termino"]], on="Turno_ID", how="left")
+                agentes_Pref = agentes_Def[["AgentID", "Turno_ID", "Hora_Inicio", "Hora_Termino", "Fecha", "disponible"]]
+                Novedades_semanal.append(agentes_Pref)
 
             # Agentes disponibles
             agentes_disponibles = filter_available_agents(agentes,dia_w,1)
@@ -329,6 +326,11 @@ def main():
 
                 # Construir dataframes
                 df_asig = build_assignment_dataframe(asignaciones, dia)
+                #inclusión de turnos asignados en el tracking de novedades diarias por agente
+                #si y solo si hay asignaciones de turnos preferentes en el día
+                if preferentes_count > 0:
+                    df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
+                #conteo de agendas reales asignadas por turno, incluyendo los turnos preferentes de los agentes con novedades
                 turnos_ilp["Real_Agendas"] = (df_asig["TurnoID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
                 
                 # Real_Matrix está en minutos (0..30 por intervalo). Para comparar con 'Requeridos' (en agentes),
@@ -372,7 +374,6 @@ def main():
         ILP_results_semanal = pd.concat(ILP_results_semanal, ignore_index=True)
         Turnos_K_Week = pd.concat(Turnos_K_Week, ignore_index=True)
         Novedades_semanal = pd.concat(Novedades_semanal, ignore_index=True)
-        Novedades_semanal = pd.merge(Novedades_semanal, turnos[["Turno_ID", "Hora_Inicio", "Hora_Termino"]], on="Turno_ID", how="left")
         
         # Formatear cobertura
         cobertura_semanal = format_coverage_for_export(cobertura_semanal)
@@ -384,7 +385,7 @@ def main():
             agentes,
             ILP_results_semanal,
             Turnos_K_Week,
-            Novedades_semanal[["AgentID", "Turno_ID", "Hora_Inicio", "Hora_Termino", "Fecha", "disponible"]],
+            Novedades_semanal,
             config.OUTPUT_ASSIGNMENT,
             config.OUTPUT_COVERAGE,
             config.OUTPUT_AGENTS,
