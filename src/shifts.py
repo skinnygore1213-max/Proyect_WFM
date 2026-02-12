@@ -52,9 +52,7 @@ def preselect_shifts(
     window_end: int,
     itv_start: np.ndarray,
     itv_end: np.ndarray,
-    required: np.ndarray,
-    cap_per_intensity: int,
-    k_preselect: int
+    required: np.ndarray
 ) -> pd.DataFrame:
     """
     Preselecciona K mejores turnos por score rápido.
@@ -92,11 +90,8 @@ def preselect_shifts(
     # 1) Cuantizar intensidad
     turnos_pref["intensity"] = turnos_pref["Duracion_Horas"].astype(float).apply(lambda h: (round(h / 0.5) * 0.5))
     
-    # Seleccionar top K
-    
+    # Seleccionar top K por intensidad (cap por nivel)
     #turnos_k = turnos_pref.sort_values("quick_score", ascending=False).head(k_preselect).reset_index(drop=True)
-    
-    logger.info(f"Preseleccionados {len(turnos_pref)} turnos solapantes")
     
     return turnos_pref
 
@@ -481,7 +476,7 @@ def select_shifts_by_intensity(
     # Seleccionar top K
     turnos_k = final_df.sort_values(score_column, ascending=False).head(n_preselect).reset_index(drop=True)
         
-    logger.info(f"Preseleccionados {len(turnos_k)} turnos de {len(turnos)} procesados por intensidad.")
+    #logger.info(f"Preseleccionados {len(turnos_k)} turnos de {len(turnos)} procesados por intensidad.")
     
     return turnos_k
 

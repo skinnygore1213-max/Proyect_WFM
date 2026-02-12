@@ -193,8 +193,6 @@ def main():
                         vector_i_min_agent, 
                         vector_f_min_agent, 
                         vector_required_agent,
-                        config.CAP_PER_INTENSITY,
-                        1
                     )
                     turnos_k_agent = select_final_shifts(
                         turnos_k_agent,
@@ -233,36 +231,35 @@ def main():
             
             # -------- 3b. Preselección heurística --------
             #logger.info(f"Preselección heurística K={config.K_PRESELECT}...")
-            turnos_k = preselect_shifts(
+            turnos_solap = preselect_shifts(
                 turnos,
                 window_start,
                 window_end,
                 vector_i_min, 
                 vector_f_min, 
-                vector_required,
-                config.CAP_PER_INTENSITY,
-                config.K_PRESELECT
+                vector_required
             )
-            turnos_k = select_final_shifts(
-                turnos_k,
+            logger.info(f"Preseleccionados {len(turnos_solap)} turnos solapantes")
+            turnos_solap = select_final_shifts(
+                turnos_solap,
                 "quick_score",
-                config.M_FINAL,
+                config.K_PRESELECT,
                 config.CAP_PER_INTENSITY
             )
             turnos_k = select_shifts_by_intensity(
-                turnos_k,
+                turnos_solap,
                 score_column="score_final",
                 n_preselect=config.K_PRESELECT,
                 cap_per_intensity=config.CAP_PER_INTENSITY
             )
-            
+            logger.info(f"Preseleccionados {len(turnos_k)} turnos por intensidad de {len(turnos_solap)} turnos solapantes.")
             # -------- 3c. Curvas exactas --------
             #logger.info(f"Cálculo de curvas exactas para K={config.K_PRESELECT}...")
             
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
             turnos_k["Fecha"] = dia
             
-            turnos_m = select_final_shifts(
+            turnos_k = select_final_shifts(
                 turnos_k,
                 "exact_score",
                 config.M_FINAL,
@@ -274,6 +271,7 @@ def main():
                 n_preselect=config.M_FINAL,
                 cap_per_intensity=config.CAP_PER_INTENSITY
             )
+            logger.info(f"Seleccionados {len(turnos_m)} turnos de {len(turnos_k)} procesados por intensidad.")
             shift_matrix = prepare_ilp_inputs(turnos_m)
 
             M = shift_matrix.shape[0]
