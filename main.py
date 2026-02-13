@@ -251,6 +251,11 @@ def main():
 
             # Agentes disponibles
             agentes_disponibles = filter_available_agents(agentes,dia_w,1)
+            #si el día es mayor al lunes se reordena la base de agentes por las horas disponibles
+            #dt.datetime.strptime(dia, "%d/%m/%Y").date()
+            ndayw = dt.datetime.strptime(dia, "%d/%m/%Y").date().weekday()
+            if ndayw > 0:
+                agentes_disponibles = agentes_disponibles.sort_values(by="Horas_Disponibles",ascending=False)
             n_agents = len(agentes_disponibles)
             logger.info(f"Agentes disponibles: {n_agents}")
             if n_agents == 0:
