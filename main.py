@@ -229,7 +229,25 @@ def main():
                 #Construcción del dataframe de novedades diarias por agente
                 agentes_Def = pd.merge(agentes_Def, turnos[["Turno_ID", "Hora_Inicio", "Hora_Termino"]], on="Turno_ID", how="left")
                 agentes_Pref = agentes_Def[["AgentID", "Turno_ID", "Hora_Inicio", "Hora_Termino", "Fecha", "disponible"]]
+                turnos_IDPref = agentes_Pref["Turno_ID"].unique().tolist()
+                #si en realidad hay turnos preferentes por novedades ejerce la logica
+                if turnos_IDPref is not None:
+                    turnos_pref = turnos.loc[turnos["Turno_ID"].isin(turnos_IDPref)].reset_index(drop=True)
+                    turnos_pref = compute_exact_curves(turnos_pref, i_min_full, f_min_full, required_full)
+                    turnos_pref["Asignados"] = 0
+                    turnos_pref["Fecha"] = dia
+                    pref_matrix = prepare_ilp_inputs(turnos_pref)
+                    turnos_pref["Real_Agendas"] = (agentes_Pref["Turno_ID"].value_counts().reindex(turnos_pref["Turno_ID"]).fillna(0).astype(int).values) if not agentes_Pref.empty else 0
+                    # Real_Matrix está en minutos (0..30 por intervalo). Para comparar con 'Requeridos' (en agentes),
+                    # convertimos a agente-equivalente dividiendo entre 30.
+                    pref_covered_min = np.zeros(48, dtype=float)
+                    for j in range(len(turnos_pref)):
+                        pref_covered_min += int(turnos_pref.loc[j, "Real_Agendas"]) * pref_matrix[j]
+                    Pref_covered = pref_covered_min / 30.0
+                    required_NoPref = required_curva - Pref_covered
                 Novedades_semanal.append(agentes_Pref)
+            else:
+                required_NoPref = required_curva
 
             # Agentes disponibles
             agentes_disponibles = filter_available_agents(agentes,dia_w,1)
@@ -292,7 +310,7 @@ def main():
             
             solver, y, u, o, M_check, T_check, status = build_daily_ilp(
                 shift_matrix,
-                required_curva,
+                required_NoPref,
                 n_agents,
                 config.ALPHA_UNDER,
                 config.BETA_OVER,
@@ -322,6 +340,7 @@ def main():
                     n_agents=n_agents              # opcional (solo logging)
                 )
 
+                '''
                 # se debe incluir aqui la logica de turnos preferentes para que lleva real_matrix todos los turnos disponibles
                 if preferentes_count > 0:
                     #Incluimos en turnos_ilp los turnos preferenciales que no estan en este listado
@@ -334,7 +353,7 @@ def main():
                         turnos_k_pref["Asignados"] = 0
                         turnos_k_pref["Fecha"] = dia
                         turnos_ilp = pd.concat([turnos_ilp, turnos_k_pref], ignore_index=True)
-                    
+                '''    
                 real_matrix = prepare_ilp_inputs(turnos_ilp)
 
                 # -------- 3f. Asignación a agentes --------
@@ -349,9 +368,9 @@ def main():
                 df_asig = build_assignment_dataframe(asignaciones, dia)
                 #inclusión de turnos asignados en el tracking de novedades diarias por agente
                 #si y solo si hay asignaciones de turnos preferentes en el día
-                if preferentes_count > 0:
+                #if preferentes_count > 0:
                     #Incluimos en las asignaciones los turnos preferenciales asignados por los novedades de losa gentes
-                    df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
+                #    df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
                 #conteo de agendas reales asignadas por turno, incluyendo los turnos preferentes de los agentes con novedades
                 turnos_ilp["Real_Agendas"] = (df_asig["Turno_ID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
                 
@@ -362,11 +381,16 @@ def main():
                     Real_covered_min += int(turnos_ilp.loc[j, "Real_Agendas"]) * real_matrix[j]
                 Real_covered = Real_covered_min / 30.0
 
+                #consolidados datos de turnos preferentes y turnos del ILP y el solver final
+                Real_covered = Real_covered + Pref_covered
+                df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
+                turnos_ilp = pd.concat([turnos_ilp, turnos_pref], ignore_index=True)
+
                 asignacion_semanal.append(df_asig)
                 turnos_ilp["Fecha"] = dia
                 ILP_results_semanal.append(turnos_ilp)
 
-                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, covered, Real_covered, dia)
+                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, Real_covered, dia)
                 cobertura_semanal.append(df_cov)
                 Turnos_K_Week.append(turnos_m)
 
@@ -399,7 +423,7 @@ def main():
         # Exportar
         export_assignment_results(
             asignacion_semanal,
-            cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Ideal_Cubierto","Real_Cubierto" ,"Under", "Over"]],
+            cobertura_semanal[["Fecha", "Inicio_HHMM", "Fin_HHMM", "Requeridos", "Real_Cubierto" ,"Under", "Over"]],
             agentes,
             ILP_results_semanal,
             Turnos_K_Week,

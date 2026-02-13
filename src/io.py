@@ -149,9 +149,9 @@ def export_assignment_results(
     export_dataframe(asignacion_semanal, output_assignment, index=False)
     export_dataframe(cobertura_semanal, output_coverage, index=False)
     export_dataframe(agentes_final, output_agents, index=False)
-    export_dataframe(ILP_results_semanal, output_ilp_results, index=False)
-    export_dataframe(turnos_k_semanal, output_turnos_k, index=False)
-    export_dataframe(novedades_semanal, output_novedades, index=False)
+    #export_dataframe(ILP_results_semanal, output_ilp_results, index=False)
+    #export_dataframe(turnos_k_semanal, output_turnos_k, index=False)
+    #export_dataframe(novedades_semanal, output_novedades, index=False)
     
     logger.info("Resultados finales exportados")
 

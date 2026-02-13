@@ -164,7 +164,6 @@ def build_coverage_dataframe(
     i_min_full: np.ndarray,
     f_min_full: np.ndarray,
     required_full: np.ndarray,
-    covered: np.ndarray,
     Real_covered: np.ndarray,
     fecha: str
 ) -> pd.DataFrame:
@@ -188,7 +187,6 @@ def build_coverage_dataframe(
         "Inicio_min": i_min_full,
         "Fin_min": f_min_full,
         "Requeridos": required_full,
-        "Ideal_Cubierto": covered,
         "Real_Cubierto": Real_covered,
         "Under": under,
         "Over": over,
