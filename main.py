@@ -263,13 +263,7 @@ def main():
                 cap_per_intensity=config.CAP_PER_INTENSITY
             )
             logger.info(f"Preseleccionados {len(turnos_k)} turnos por intensidad de {len(turnos_solap)} turnos solapantes.")
-
-            #Incluimos en turnos_K los turnos preferenciales que no estan en este listado
-            turnosID = turnos_k["Turno_ID"].unique().tolist()
-            turnos_IDPref = agentes_Pref.loc[~agentes_Pref["Turno_ID"].isin(turnosID), "Turno_ID"].unique().tolist()
-            turnos_k_pref = turnos.loc[turnos["Turno_ID"].isin(turnos_IDPref)]
-            turnos_k = pd.concat([turnos_k, turnos_k_pref], ignore_index=True)
-
+            
             # -------- 3c. Curvas exactas --------
             #logger.info(f"Cálculo de curvas exactas para K={config.K_PRESELECT}...")
             turnos_k = compute_exact_curves(turnos_k, i_min_full, f_min_full, required_full)
@@ -328,6 +322,19 @@ def main():
                     n_agents=n_agents              # opcional (solo logging)
                 )
 
+                # se debe incluir aqui la logica de turnos preferentes para que lleva real_matrix todos los turnos disponibles
+                if preferentes_count > 0:
+                    #Incluimos en turnos_ilp los turnos preferenciales que no estan en este listado
+                    turnosID = turnos_ilp["Turno_ID"].unique().tolist()
+                    turnos_IDPref = agentes_Pref.loc[~agentes_Pref["Turno_ID"].isin(turnosID), "Turno_ID"].unique().tolist()
+                    #si en realidad no hay turnos en ILP ejerce la logica
+                    if turnos_IDPref is not None:
+                        turnos_k_pref = turnos.loc[turnos["Turno_ID"].isin(turnos_IDPref)]
+                        turnos_k_pref = compute_exact_curves(turnos_k_pref, i_min_full, f_min_full, required_full)
+                        turnos_k_pref["Asignados"] = 0
+                        turnos_k_pref["Fecha"] = dia
+                        turnos_ilp = pd.concat([turnos_ilp, turnos_k_pref], ignore_index=True)
+                    
                 real_matrix = prepare_ilp_inputs(turnos_ilp)
 
                 # -------- 3f. Asignación a agentes --------
@@ -343,6 +350,7 @@ def main():
                 #inclusión de turnos asignados en el tracking de novedades diarias por agente
                 #si y solo si hay asignaciones de turnos preferentes en el día
                 if preferentes_count > 0:
+                    #Incluimos en las asignaciones los turnos preferenciales asignados por los novedades de losa gentes
                     df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
                 #conteo de agendas reales asignadas por turno, incluyendo los turnos preferentes de los agentes con novedades
                 turnos_ilp["Real_Agendas"] = (df_asig["Turno_ID"].value_counts().reindex(turnos_ilp["Turno_ID"]).fillna(0).astype(int).values) if not df_asig.empty else 0
