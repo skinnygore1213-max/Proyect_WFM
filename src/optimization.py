@@ -13,8 +13,10 @@ IMPORTANTE (nueva lógica en minutos):
 
 import numpy as np
 from ortools.linear_solver import pywraplp
+from ortools.sat.python import cp_model
 from typing import Tuple, List, Dict
 import logging
+from datetime import timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -169,3 +171,172 @@ def is_solution_valid(status: int) -> bool:
     True si status es OPTIMAL o FEASIBLE.
     """
     return status in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE)
+
+def solve_wfm_semanal(
+        n_agents :np.ndarray,
+        agents_results :np.ndarray,
+        days :np.ndarray, 
+        shifts_by_day :np.ndarray,
+        shifts_info :np.ndarray,
+        quotas :np.ndarray, 
+        heuristic_results :np.ndarray,
+        MAX_HOURS_WEEK :int,
+        REST_MIN_GAP :int,
+        #agent_params
+        ):
+    """
+    n_agents: int
+    days: range(7)
+    shifts_by_day: dict con listas de indices de turnos por dia d
+    quotas: dict (j, d) -> cantidad de agentes requeridos
+    heuristic_results: dict (i, d) -> indice del turno asignado por tu Fase 1
+    agent_params: dict con min_hours, max_hours, pref_windows, etc.
+    """
+    model = cp_model.CpModel()
+    solver = cp_model.CpSolver()
+
+    # -------------------------
+    # Preprocesamiento (dicts/sets)
+    # -------------------------
+    if isinstance(n_agents, (int, np.integer)):
+        agent_ids = list(range(int(n_agents)))
+    else:
+        agent_ids = [int(a) for a in n_agents]
+
+    if days is None:
+        days_list = sorted(shifts_by_day.keys())
+    else:
+        days_list = [int(d) for d in days]
+    days_set = set(days_list)
+
+    shifts_by_day = {int(d): [j for j in shifts_by_day.get(d, [])] for d in days_list}
+
+    if isinstance(shifts_info, dict):
+        start_min = {j: int(v[0]) for j, v in shifts_info.items()}
+        end_min = {j: int(v[1]) for j, v in shifts_info.items()}
+        duration = {j: v[2] for j, v in shifts_info.items()}
+    else:
+        start_min = {j: int(shifts_info[j][0]) for j in range(len(shifts_info))}
+        end_min = {j: int(shifts_info[j][1]) for j in range(len(shifts_info))}
+        duration = {j: int(shifts_info[j][2]) for j in range(len(shifts_info))}
+
+    if isinstance(heuristic_results, dict):
+        assignments = [(int(i), int(d), j) for (i, d), j in heuristic_results.items() if j is not None]
+        heuristic_map = {(i, d): j for i, d, j in assignments}
+    else:
+        assignments = [(int(i), int(d), j) for i, d, j in heuristic_results]
+        heuristic_map = {(i, d): j for i, d, j in assignments}
+
+    # 1. VARIABLES, mejorado a partir de todas las signaciones en turnos en ILP, seleccionado en el paso anterior a esta funcion (Bloque 1)
+    x = {}
+    x_by_agent_day = {}
+    x_by_agent_day_shift = {}
+    x_by_shift_day = {}
+    x_by_agent = {}
+    seen = set()
+
+    # Estan en el orden agente, dia, turno
+    for i, d, j in assignments:
+        key = (i, d, j)
+        if key in seen:
+            continue
+        seen.add(key)
+        var = model.NewBoolVar(f"x_{i}_{d}_{j}")
+        x[key] = var
+        x_by_agent_day.setdefault((i, d), []).append(var)
+        x_by_agent_day_shift.setdefault((i, d), []).append((j, var))
+        x_by_shift_day.setdefault((j, d), []).append(var)
+        x_by_agent.setdefault(i, []).append((var, duration.get(j, 0)))
+
+    # RESTRICCIONES DURAS (Bloques 2, 3, 5, 6)
+    # 2.Un turno por dia por agente (Bloque 2)
+    for vars_day in x_by_agent_day.values():
+        if len(vars_day) > 1:
+            model.AddAtMostOne(vars_day)
+
+    # 3.Cumplir los cupos (Bloque 3)
+    if isinstance(quotas, dict):
+        quota_items = quotas.items()
+    else:
+        quota_items = (((j, d), quotas[j, d]) for d in days_list for j in shifts_by_day.get(d, []))
+
+    for (j, d), q in quota_items:
+        q_int = int(q)
+        if q_int <= 0:
+            continue
+        vars_shift_day = x_by_shift_day.get((j, int(d)))
+        if vars_shift_day:
+            model.Add(sum(vars_shift_day) >= q_int)
+        else:
+            model.Add(0 >= q_int)
+
+    # Descanso minimo entre dias (Bloque 5)
+    # REST_MIN_GAP = 660 (11 horas)
+    conflict_next_by_day = {}
+    for d in days_list:
+        d_next = d + 1
+        if d_next not in days_set:
+            continue
+        shifts_d = shifts_by_day.get(d, [])
+        shifts_next = shifts_by_day.get(d_next, [])
+        if not shifts_d or not shifts_next:
+            continue
+        next_starts = np.array([start_min[jp] for jp in shifts_next], dtype=int) + 1440
+        conflict_map = {}
+        for j in shifts_d:
+            rest = next_starts - end_min[j]
+            idx = np.nonzero(rest < REST_MIN_GAP)[0]
+            if idx.size:
+                conflict_map[j] = {shifts_next[k] for k in idx}
+        if conflict_map:
+            conflict_next_by_day[d] = conflict_map
+
+    for i in agent_ids:
+        for d, conflict_map in conflict_next_by_day.items():
+            vars_d = x_by_agent_day_shift.get((i, d))
+            vars_next = x_by_agent_day_shift.get((i, d + 1))
+            if not vars_d or not vars_next:
+                continue
+            for j, var in vars_d:
+                bad_next = conflict_map.get(j)
+                if not bad_next:
+                    continue
+                for jp, var_next in vars_next:
+                    if jp in bad_next:
+                        model.Add(var + var_next <= 1)
+
+    # Horas semanales: Minimas y Maximas (Bloque 6 ampliado)
+    # BLOQUE 6 - Horas maximas semanales por agente
+    for i in agent_ids:
+        pairs = x_by_agent.get(i)
+        if not pairs:
+            continue
+        model.Add(sum(var * dur for var, dur in pairs) <= MAX_HOURS_WEEK)
+
+    # 3. SOFT CONSTRAINT: Respetar la Heuristica (Fase 1)
+    # Creamos una penalizacion si el Solver decide cambiar lo que tu ya calculaste
+    penalidades_cambio = []
+
+    for (i, d), turno_h in heuristic_map.items():
+        var = x.get((i, d, turno_h))
+        if var is None:
+            continue
+        # Si x[i, d, turno_h] es 0, significa que el solver CAMBIO tu propuesta.
+        # Queremos MAXIMIZAR la coincidencia, o MINIMIZAR el cambio.
+        cambio = model.NewBoolVar(f"cambio_{i}_{d}")
+        model.Add(cambio + var == 1)
+        penalidades_cambio.append(cambio)
+
+    # 4. OBJETIVO (Bloque 9 + Soft Constraints)
+    # Peso alto a mantener la heuristica, peso bajo a romper empates
+    costo_cambio = sum(penalidades_cambio) * 100
+    tie_breaker = sum((0.0001 * (int(i) + int(d) + j)) * var for (i, d, j), var in x.items())
+
+    model.Minimize(costo_cambio + tie_breaker)
+
+    # 5. EJECUCION
+    status = solver.Solve(model)
+
+    return solver, status
+
+    # ... extraer resultados ...
