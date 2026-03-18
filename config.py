@@ -57,6 +57,7 @@ OUTPUT_AGENTS = f"{OUTPUT_DIR}/Agents.xlsx"
 OUTPUT_ILP_RESULTS = f"{OUTPUT_DIR}/ILP_Results.xlsx"
 OUTPUT_TURNOS_K = f"{OUTPUT_DIR}/Turnos_K.xlsx"
 OUTPUT_NOVEDADES = f"{OUTPUT_DIR}/Novedades.xlsx"
+OUTPUT_MILP = f"{OUTPUT_DIR}/IMLP_Result.xlsx"
 
 OUTPUT_LOG_FILE = f"{OUTPUT_DIR}/execution.log"
 

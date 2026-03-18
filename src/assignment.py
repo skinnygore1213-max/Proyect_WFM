@@ -159,11 +159,12 @@ def build_assignment_dataframe(asignaciones: List[Dict], fecha: str) -> pd.DataF
     df["Fecha"] = fecha
     return df
 
-
 def build_coverage_dataframe(
     i_min_full: np.ndarray,
     f_min_full: np.ndarray,
     required_full: np.ndarray,
+    Real_covered_min: np.ndarray,
+    required: np.ndarray,
     Real_covered: np.ndarray,
     fecha: str
 ) -> pd.DataFrame:
@@ -180,13 +181,15 @@ def build_coverage_dataframe(
     Returns:
         DataFrame con cobertura por intervalo
     """
-    under = np.maximum(required_full - Real_covered, 0)
-    over = np.maximum(Real_covered - required_full, 0)
+    under = np.maximum(required - Real_covered, 0)
+    over = np.maximum(Real_covered - required, 0)
     
     df = pd.DataFrame({
         "Inicio_min": i_min_full,
         "Fin_min": f_min_full,
-        "Requeridos": required_full,
+        "Mins_Requeridos": required_full,
+        "Mins_Cubiertos":Real_covered_min,
+        "Requeridos": required,
         "Real_Cubierto": Real_covered,
         "Under": under,
         "Over": over,

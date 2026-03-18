@@ -35,7 +35,7 @@ from src.transforms import (
 from src.time_utils import min_to_hhmm
 from src.coverage import detect_time_window, filter_to_window, log_window_info
 from src.shifts import prepare_ilp_inputs, preselect_shifts, compute_exact_curves, select_final_shifts, select_ilp_shifts, select_shifts_by_intensity
-from src.optimization import build_daily_ilp, extract_solution, is_solution_valid,solve_wfm_semanal
+from src.optimization import build_daily_ilp, extract_solution, is_solution_valid,solve_wfm_semanal, extract_solution_IMLP
 from src.assignment import (
     assign_shifts_to_agents,
     build_assignment_dataframe,
@@ -136,7 +136,8 @@ def main():
             curva_dia = curva[curva['Fecha'] == dia].copy()
 
             # Vectores de datos
-            required_curva = curva_dia["Requeridos"].astype(int).values
+            required = curva_dia["Requeridos"].astype(int).values
+            required_curva = curva_dia["Minutes_Req"].astype(int).values
             required_full = curva_dia["Req_True"].values
             i_min_full = curva_dia["i_min"].values
             f_min_full = curva_dia["f_min"].values
@@ -243,8 +244,8 @@ def main():
                     pref_covered_min = np.zeros(48, dtype=float)
                     for j in range(len(turnos_pref)):
                         pref_covered_min += int(turnos_pref.loc[j, "Real_Agendas"]) * pref_matrix[j]
-                    Pref_covered = pref_covered_min / 30.0
-                    required_NoPref = required_curva - Pref_covered
+                    #Pref_covered = pref_covered_min / 30.0
+                    required_NoPref = required_curva - pref_covered_min
                 Novedades_semanal.append(agentes_Pref)
             else:
                 required_NoPref = required_curva
@@ -370,10 +371,11 @@ def main():
                 Real_covered_min = np.zeros(48, dtype=float)
                 for j in range(len(turnos_ilp)):
                     Real_covered_min += int(turnos_ilp.loc[j, "Real_Agendas"]) * real_matrix[j]
+                Real_covered_min = Real_covered_min + pref_covered_min
                 Real_covered = Real_covered_min / 30.0
 
                 #consolidados datos de turnos preferentes y turnos del ILP y el solver final
-                Real_covered = Real_covered + Pref_covered
+                
                 df_asig = pd.concat([agentes_Pref, df_asig], ignore_index=True)
                 turnos_ilp = pd.concat([turnos_ilp, turnos_pref], ignore_index=True)
 
@@ -381,7 +383,7 @@ def main():
                 turnos_ilp["Fecha"] = dia
                 ILP_results_semanal.append(turnos_ilp)
 
-                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, Real_covered, dia)
+                df_cov = build_coverage_dataframe(i_min_full, f_min_full, required_curva, Real_covered_min, required, Real_covered, dia)
                 cobertura_semanal.append(df_cov)
                 Turnos_K_Week.append(turnos_m)
 
@@ -424,28 +426,29 @@ def main():
         dias_disponibles = sorted(curva_by_dia['dia'].unique())
         demand_dict = curva_by_dia.set_index('dia')['Requeridos'].to_dict()
         # Creamos un diccionario donde la llave es el ID y el valor es una tupla o lista
-        turnos_unicos = ILP_results_semanal['Turno_ID'].unique()
+        #turnos_unicos = ILP_results_semanal['Turno_ID'].unique()
+        turnos_unicos = turnos["Turno_ID"].unique()
         turno_to_idx = {turno_str: idx for idx, turno_str in enumerate(turnos_unicos)}
         # dict inverso para traducir el output del solver después
         idx_to_turno = {idx: turno_str for turno_str, idx in turno_to_idx.items()}
+        turnos['Turno_Index'] = turnos['Turno_ID'].map(turno_to_idx)
         ILP_results_semanal['Turno_Index'] = ILP_results_semanal['Turno_ID'].map(turno_to_idx)
         ILP_results_semanal['Fecha'] = pd.to_datetime(ILP_results_semanal['Fecha'], format="%d/%m/%Y")
         ILP_results_semanal['dia'] = ILP_results_semanal['Fecha'].dt.weekday
-        ILP_results_semanal['Duracion_Minutos'] = (ILP_results_semanal['Duracion_Horas'] * 60).astype(int)
         MAX_HOURS_WEEK_MIN = int(config.MAX_HOURS_WEEK * 60)
         turnos_by_fecha = ILP_results_semanal.groupby("dia")["Turno_Index"].apply(list).to_dict()
         MILP_info = ILP_results_semanal.set_index(["Turno_Index", "dia"])["Real_Agendas"].to_dict()
-        turnos_dict = ILP_results_semanal.drop_duplicates(subset=['Turno_Index','start_min','end_min','Duracion_Minutos'])
-        turnos_dict = turnos_dict.set_index('Turno_Index')[['start_min','end_min','Duracion_Minutos']].T.to_dict('list')
+        #turnos_dict = ILP_results_semanal.drop_duplicates(subset=['Turno_Index','start_min','end_min','Duracion_Minutos'])
+        turnos_dict = turnos.set_index('Turno_Index')[['start_min','end_min','Duracion_Minutos']].T.to_dict('list')
         #resultado del proceos No1, se condensa para pasara a MILP
         asignacion_semanal["AgentID"] = asignacion_semanal["AgentID"].astype(int).values
         asignacion_semanal['Fecha'] = pd.to_datetime(asignacion_semanal['Fecha'], format="%d/%m/%Y")
         asignacion_semanal['dia'] = asignacion_semanal['Fecha'].dt.weekday
         asignacion_semanal['Turno_Index'] = asignacion_semanal['Turno_ID'].map(turno_to_idx)
         MILP_Source = list(asignacion_semanal[["AgentID", "dia", "Turno_Index"]].itertuples(index=False, name=None))
-
-        #'''
-        solverMILP, statusMILP = solve_wfm_semanal(
+        resultadosMILP=ILP_results_semanal
+        '''
+        solverMILP, statusMILP, x, x_by_agent_day, x_by_shift_day, x_by_agent = solve_wfm_semanal(
                         agentes_ids,
                         agents_results,
                         dias_disponibles,
@@ -455,7 +458,11 @@ def main():
                         MILP_Source,
                         MAX_HOURS_WEEK_MIN,
                         config.REST_MIN_GAP,                
-        )#'''
+        )
+        resultadosMILP = extract_solution_IMLP(solverMILP, statusMILP, x, idx_to_turno, turnos_dict)
+        resultadosMILP = pd.DataFrame(resultadosMILP)#, columns=["AgentID", "dia", "Turno_Index", "Assigned"]
+        
+        #'''
         # ============================================================
         # 4. EXPORTACIÓN DE RESULTADOS
         # ============================================================
@@ -474,12 +481,14 @@ def main():
             ILP_results_semanal,
             Turnos_K_Week,
             Novedades_semanal,
+            resultadosMILP,
             config.OUTPUT_ASSIGNMENT,
             config.OUTPUT_COVERAGE,
             config.OUTPUT_AGENTS,
             config.OUTPUT_ILP_RESULTS,
             config.OUTPUT_TURNOS_K,
-            config.OUTPUT_NOVEDADES
+            config.OUTPUT_NOVEDADES,
+            config.OUTPUT_MILP
         )
         
         # ============================================================

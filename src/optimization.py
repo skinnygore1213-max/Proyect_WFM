@@ -81,7 +81,7 @@ def build_daily_ilp(
         solver.Add(y[j] == sum(seg[j]))
 
     # Restricción balance por intervalo (en minutos)
-    required_min = np.asarray(required_full, dtype=float) * 30.0
+    required_min = np.asarray(required_full, dtype=float) #* 30.0 se convierte en parse_time_intervals de transforms.py 
     for t in range(T):
         coverage_expr = sum(y[j] * int(shift_matrix[j, t]) for j in range(M))  # minutos
         solver.Add(coverage_expr - required_min[t] == o[t] - u[t])
@@ -140,7 +140,7 @@ def extract_solution(
         coverage_min += float(cnt) * shift_matrix[j]
 
     # Convertimos a agentes-equivalente
-    coverage = coverage_min / 30.0
+    coverage = coverage_min #/ 30.0 todo se esta calculando en minutos
 
     under_val = np.array([float(u[t].solution_value()) for t in range(len(u))], dtype=float)  # minutos
     over_val  = np.array([float(o[t].solution_value()) for t in range(len(o))], dtype=float)  # minutos
@@ -236,25 +236,19 @@ def solve_wfm_semanal(
     seen = set()
 
     # Estan en el orden agente, dia, turno
-    for i, d, j in assignments:
-        key = (i, d, j)
-        if key in seen:
-            continue
-        seen.add(key)
-        var = model.NewBoolVar(f"x_{i}_{d}_{j}")
-        x[key] = var
-        x_by_agent_day.setdefault((i, d), []).append(var)
-        x_by_agent_day_shift.setdefault((i, d), []).append((j, var))
-        x_by_shift_day.setdefault((j, d), []).append(var)
-        x_by_agent.setdefault(i, []).append((var, duration.get(j, 0)))
+    for i in n_agents:
+        for d in days:
+            # permitir todos los turnos del catálogo para ese día, no solo el que sugirió el Daily-ILP .
+            for j in len(shifts_info):
+                key = (int(i), int(d), int(j))
+                var = model.NewBoolVar(f"x_{i}_{d}_{j}")
+                x[key] = var
+                x_by_agent_day.setdefault((int(i), int(d)), []).append(var)
+                x_by_agent.setdefault(int(i), []).append((var, int(duration.get(j, 0))))
 
-    # RESTRICCIONES DURAS (Bloques 2, 3, 5, 6)
-    # 2.Un turno por dia por agente (Bloque 2)
-    for vars_day in x_by_agent_day.values():
-        if len(vars_day) > 1:
-            model.AddAtMostOne(vars_day)
-
+    # RESTRICCIONES DURAS 
     # 3.Cumplir los cupos (Bloque 3)
+    '''
     if isinstance(quotas, dict):
         quota_items = quotas.items()
     else:
@@ -269,9 +263,10 @@ def solve_wfm_semanal(
             model.Add(sum(vars_shift_day) >= q_int)
         else:
             model.Add(0 >= q_int)
-
+    '''
     # Descanso minimo entre dias (Bloque 5)
     # REST_MIN_GAP = 660 (11 horas)
+    '''
     conflict_next_by_day = {}
     for d in days_list:
         d_next = d + 1
@@ -304,24 +299,46 @@ def solve_wfm_semanal(
                 for jp, var_next in vars_next:
                     if jp in bad_next:
                         model.Add(var + var_next <= 1)
-
-    # Horas semanales: Minimas y Maximas (Bloque 6 ampliado)
+'''
+    # Horas semanales: Minimas y Maximas
+    # 2.Un turno por dia por agente (Bloque 2)
+    '''
+    for vars_day in x_by_agent_day.values():
+        if len(vars_day) > 1:
+            model.AddAtMostOne(vars_day)
+    '''
     # BLOQUE 6 - Horas maximas semanales por agente
-    for i in agent_ids:
-        pairs = x_by_agent.get(i)
-        if not pairs:
-            continue
-        model.Add(sum(var * dur for var, dur in pairs) <= MAX_HOURS_WEEK)
+    for i in n_agents:
+        dias_trabajados_vars = []
+        for d in days:
+            vars_day = x_by_agent_day.get((int(i), int(d)), [])
+            if vars_day:
+                # Máximo un turno por día
+                model.AddAtMostOne(vars_day)
+                
+                # Variable auxiliar para contar si trabajó el día d
+                trabaja_hoy = model.NewBoolVar(f"trabaja_{i}_{d}")
+                model.Add(trabaja_hoy == sum(vars_day))
+                dias_trabajados_vars.append(trabaja_hoy)
+
+        # Restricción de días: máximo 5 o 6 según tu requerimiento 
+        model.Add(sum(dias_trabajados_vars) <= 6) 
+
+        # REQUERIMIENTO IMPERATIVO: Exactamente 44 horas (en minutos)
+        pairs = x_by_agent.get(int(i), [])
+        if pairs:
+            # Usamos igualdad (==) porque es un requerimiento "sí o sí"
+            model.Add(sum(var * dur for var, dur in pairs) <= MAX_HOURS_WEEK)
 
     # 3. SOFT CONSTRAINT: Respetar la Heuristica (Fase 1)
-    # Creamos una penalizacion si el Solver decide cambiar lo que tu ya calculaste
+    # Creamos una penalizacion si el Solver decide cambiar lo que se calculo
     penalidades_cambio = []
 
     for (i, d), turno_h in heuristic_map.items():
         var = x.get((i, d, turno_h))
         if var is None:
             continue
-        # Si x[i, d, turno_h] es 0, significa que el solver CAMBIO tu propuesta.
+        # Si x[i, d, turno_h] es 0, significa que el solver CAMBIO la propuesta.
         # Queremos MAXIMIZAR la coincidencia, o MINIMIZAR el cambio.
         cambio = model.NewBoolVar(f"cambio_{i}_{d}")
         model.Add(cambio + var == 1)
@@ -329,14 +346,37 @@ def solve_wfm_semanal(
 
     # 4. OBJETIVO (Bloque 9 + Soft Constraints)
     # Peso alto a mantener la heuristica, peso bajo a romper empates
-    costo_cambio = sum(penalidades_cambio) * 100
+    costo_cambio = sum(penalidades_cambio) * 10
     tie_breaker = sum((0.0001 * (int(i) + int(d) + j)) * var for (i, d, j), var in x.items())
 
     model.Minimize(costo_cambio + tie_breaker)
 
     # 5. EJECUCION
+    #status = solver.Solve()
     status = solver.Solve(model)
 
-    return solver, status
+    return solver, status, x, x_by_agent_day, x_by_shift_day, x_by_agent
 
-    # ... extraer resultados ...
+def extract_solution_IMLP(solver, status, x, idx_to_turno, shifts_info):
+    if status not in [0, 1]: # 0: OPTIMAL, 1: FEASIBLE
+        print("No se pudo generar el informe: El solver no encontró una solución legal.")
+        return None
+
+    resultados = []
+    
+    # Recorremos todas las variables x definidas en el solver
+    for (agent_id, dia, t_idx), var in x.items():
+        if solver.Value(var) == 1: # Si el solver asignó este turno
+            # Recuperamos el nombre original del turno y su duración
+            turno_id = idx_to_turno[t_idx]
+            # Convertimos minutos a horas para el reporte final
+            duracion_horas = shifts_info[t_idx][2] / 60 
+            
+            resultados.append({
+                "AgentID": agent_id,
+                "Dia_Semana": dia,
+                "Turno_ID": turno_id,
+                "Horas_Asignadas": duracion_horas
+            })
+
+    return resultados

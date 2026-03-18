@@ -71,7 +71,6 @@ def load_data_bundle(
     curva = load_csv(curva_path, sep=sep, encoding=encoding)
     agentes = load_csv(agentes_path, sep=sep, encoding=encoding)
     turnos = load_csv(turnos_path, sep=sep, encoding=encoding)
-    curva["Req_True"] = (curva["Requeridos"].astype(int) > 0).astype(int)
     
     logger.info("Todos los archivos cargados correctamente")
     return curva, agentes, turnos
@@ -127,12 +126,14 @@ def export_assignment_results(
     ILP_results_semanal: pd.DataFrame,
     turnos_k_semanal: pd.DataFrame,
     novedades_semanal: pd.DataFrame,
+    resultadosMILP: pd.DataFrame,
     output_assignment: str,
     output_coverage: str,
     output_agents: str,
     output_ilp_results: str,
     output_turnos_k: str,
-    output_novedades: str
+    output_novedades: str,
+    output_MILP: str
 ) -> None:
     """
     Exporta los 3 archivos de resultado.
@@ -152,6 +153,7 @@ def export_assignment_results(
     #export_dataframe(ILP_results_semanal, output_ilp_results, index=False)
     #export_dataframe(turnos_k_semanal, output_turnos_k, index=False)
     #export_dataframe(novedades_semanal, output_novedades, index=False)
+    export_dataframe(resultadosMILP, output_MILP, index=False)
     
     logger.info("Resultados finales exportados")
 

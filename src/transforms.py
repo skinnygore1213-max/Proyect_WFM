@@ -88,6 +88,12 @@ def parse_time_intervals(curva: pd.DataFrame) -> pd.DataFrame:
     
     # Generar 'Fin' (30 min después)
     df["Fin"] = df["Intervalo"] + timedelta(minutes=30)
+
+    #valores binarios para solapar turnos por intervalo vs el requerido
+    df["Req_True"] = (curva["Requeridos"].astype(int) > 0).astype(int)
+
+    #genera la columna de minutos requeridos
+    df["Minutes_Req"]  = df["Requeridos"] * 30
     
     return df
 
@@ -137,7 +143,7 @@ def process_turnos_catalog(turnos: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].astype(str).str.strip()
         else:
             df[col] = ""
-    
+   
     # -----------------------------
     # FIX: Refrigerio mal digitado (AM/PM) o fuera del turno
     # Si Inicio_Refrigerio < Hora_Inicio, buscamos el mejor alineamiento (+12h, +24h, etc.)
@@ -179,6 +185,9 @@ def process_turnos_catalog(turnos: pd.DataFrame) -> pd.DataFrame:
     else:
         # Calcular desde start_min y end_min como fallback
         df["Duracion_Horas"] = (df["end_min"] - df["start_min"]) / 60
+
+    #duración en minutos por cada turno
+    df['Duracion_Minutos'] = (df['Duracion_Horas'] * 60).astype(int)
     
     return df
 
